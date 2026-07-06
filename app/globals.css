@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* HSL tokens copied verbatim from afrotransact-v2-ui/app/globals.css so the
+   storefront and the inventory tool share one visual language. */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --primary: 47 92% 53%;             /* brand gold */
+    --primary-foreground: 41 100% 7%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 220 14% 96%;
+    --accent-foreground: 222 47% 11%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 47 92% 53%;
+
+    --brand-gold: 45 100% 51%;
+    --brand-gold-hover: 45 100% 49%;
+    --brand-gold-foreground: 41 100% 7%;
+
+    --brand-dark: 180 1% 19%;
+    --brand-dark-foreground: 0 0% 98%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Sonner toast theming so the brand color reads on hover/active states. */
+[data-sonner-toaster] {
+  --normal-bg: hsl(var(--card));
+  --normal-text: hsl(var(--foreground));
+  --normal-border: hsl(var(--border));
+}
