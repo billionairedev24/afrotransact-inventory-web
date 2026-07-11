@@ -90,6 +90,10 @@ export interface ProductFullRequest {
   brand?: string
   status: ProductStatus
   category_ids?: string[]
+  tags?: string[]
+  highlights?: string[]
+  meta_title?: string
+  meta_description?: string
   images?: { url: string; alt_text?: string; sort_order?: number }[]
   location_id: string
   variants: {

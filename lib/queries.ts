@@ -116,6 +116,10 @@ export interface NewProductInput {
   brand?: string
   status: ProductStatus
   categoryIds?: string[]
+  tags?: string[]
+  highlights?: string[]
+  metaTitle?: string
+  metaDescription?: string
   imageUrls?: string[]
   locationId: string
   variants: NewVariantInput[]
@@ -138,6 +142,10 @@ export function useCreateFullProduct() {
         brand: input.brand,
         status: input.status,
         category_ids: input.categoryIds ?? [],
+        tags: input.tags ?? [],
+        highlights: input.highlights ?? [],
+        meta_title: input.metaTitle,
+        meta_description: input.metaDescription,
         images: (input.imageUrls ?? []).map((url, i) => ({ url, sort_order: i })),
         location_id: input.locationId,
         variants: input.variants.map((v) => ({

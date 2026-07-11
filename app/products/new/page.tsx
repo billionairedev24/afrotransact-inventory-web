@@ -46,6 +46,10 @@ export default function NewProductPage() {
   const [status, setStatus] = useState<ProductStatus>("active")
   const [locationId, setLocationId] = useState("")
   const [categoryId, setCategoryId] = useState("")
+  const [tags, setTags] = useState("")
+  const [highlights, setHighlights] = useState("")
+  const [metaTitle, setMetaTitle] = useState("")
+  const [metaDescription, setMetaDescription] = useState("")
   const [imageUrls, setImageUrls] = useState<string[]>([])
   const [imgDraft, setImgDraft] = useState("")
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -118,6 +122,10 @@ export default function NewProductPage() {
         brand: brand.trim() || undefined,
         status,
         categoryIds: categoryId ? [categoryId] : undefined,
+        tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+        highlights: highlights.split("\n").map((h) => h.trim()).filter(Boolean),
+        metaTitle: metaTitle.trim() || undefined,
+        metaDescription: metaDescription.trim() || undefined,
         imageUrls,
         locationId: resolvedLocation,
         variants: parsed,
@@ -175,13 +183,42 @@ export default function NewProductPage() {
               </div>
             </div>
             <div>
-              <FieldLabel htmlFor="cat">Category (optional)</FieldLabel>
+              <FieldLabel htmlFor="cat">Category</FieldLabel>
               <Select id="cat" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
                 <option value="">— none —</option>
                 {(categories ?? []).map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </Select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Pulled from the AfroTransact platform taxonomy. Need a new one? An admin adds it in the admin portal.
+              </p>
+            </div>
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader>Discovery &amp; SEO <span className="font-normal text-muted-foreground">(optional)</span></CardHeader>
+          <CardBody className="space-y-4">
+            <div>
+              <FieldLabel htmlFor="tags">Tags</FieldLabel>
+              <Input id="tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="rice, jollof, staple, party-size" />
+              <p className="mt-1 text-xs text-muted-foreground">Comma-separated. Helps buyers find this in search.</p>
+            </div>
+            <div>
+              <FieldLabel htmlFor="highlights">Highlights</FieldLabel>
+              <Textarea id="highlights" rows={3} value={highlights} onChange={(e) => setHighlights(e.target.value)} placeholder={"One selling point per line\nStone-free, long grain\nImported from Abakaliki"} />
+              <p className="mt-1 text-xs text-muted-foreground">One bullet per line — shown on the product page.</p>
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <FieldLabel htmlFor="metaTitle">Meta title</FieldLabel>
+                <Input id="metaTitle" value={metaTitle} onChange={(e) => setMetaTitle(e.target.value)} placeholder="SEO title override" />
+              </div>
+              <div>
+                <FieldLabel htmlFor="metaDesc">Meta description</FieldLabel>
+                <Input id="metaDesc" value={metaDescription} onChange={(e) => setMetaDescription(e.target.value)} placeholder="SEO description override" />
+              </div>
             </div>
           </CardBody>
         </Card>
