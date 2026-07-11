@@ -29,6 +29,11 @@ const num = (s: string): number | undefined => {
   return Number.isNaN(n) ? undefined : n
 }
 
+const LBS_TO_KG = 0.45359237
+// The form takes weight in pounds (operator-friendly); the backend stores kg.
+const lbToKg = (lb: number | undefined): number | undefined =>
+  lb === undefined ? undefined : Math.round((lb * LBS_TO_KG) * 1000) / 1000
+
 const money = (cents: number) =>
   `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
@@ -96,7 +101,7 @@ export default function NewProductPage() {
         name: v.name.trim() || undefined,
         priceCents: Math.round(parseFloat(v.price || "0") * 100),
         initialStock: parseInt(v.qty || "0", 10) || 0,
-        weightKg: num(v.weight),
+        weightKg: lbToKg(num(v.weight)),
         lengthIn: num(v.length),
         widthIn: num(v.width),
         heightIn: num(v.height),
@@ -250,8 +255,8 @@ export default function NewProductPage() {
                       </summary>
                       <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
                         <div>
-                          <FieldLabel htmlFor={`vw${i}`}>Weight (kg)</FieldLabel>
-                          <Input id={`vw${i}`} type="number" min="0" step="0.001" value={v.weight} onChange={(e) => setVariant(i, { weight: e.target.value })} placeholder="18.14" />
+                          <FieldLabel htmlFor={`vw${i}`}>Weight (lb)</FieldLabel>
+                          <Input id={`vw${i}`} type="number" min="0" step="0.01" value={v.weight} onChange={(e) => setVariant(i, { weight: e.target.value })} placeholder="40" />
                         </div>
                         <div>
                           <FieldLabel htmlFor={`vl${i}`}>Length (in)</FieldLabel>

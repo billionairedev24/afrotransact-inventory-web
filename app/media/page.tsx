@@ -126,11 +126,11 @@ function MediaCard({
           <button
             type="button"
             onClick={() => setEditing(true)}
-            className="group flex w-full items-center gap-1 text-left text-xs font-medium text-foreground"
-            title="Click to rename"
+            className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs font-medium text-foreground hover:bg-muted"
+            title="Rename this image"
           >
-            <span className="truncate">{asset.name}</span>
-            <Pencil className="h-3 w-3 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100" />
+            <span className="min-w-0 flex-1 truncate">{asset.name}</span>
+            <Pencil className="h-3 w-3 shrink-0 text-muted-foreground" />
           </button>
         )}
       </CardBody>

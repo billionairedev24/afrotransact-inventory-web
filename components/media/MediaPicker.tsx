@@ -1,21 +1,22 @@
 "use client"
 
 import { useRef } from "react"
-import { Plus, RefreshCw } from "lucide-react"
+import { Plus, RefreshCw, X } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/Button"
+import { Select } from "@/components/ui/Input"
 import { useMedia, useSyncMediaFromUploadThing } from "@/lib/queries"
 import { useMediaUpload } from "@/components/media/useMediaUpload"
 
 /**
- * Selects images for a product from the shared media library (reference named
- * assets instead of re-uploading), with an inline "upload new" that lands in the
- * library too. `value` is the ordered list of selected image URLs.
+ * Adds images to a product by picking named assets from the media library via a
+ * dropdown (reference by name — no re-uploading), with inline "upload new" and
+ * "sync". `value` is the ordered list of selected image URLs.
  */
 export function MediaPicker({
   value,
   onChange,
-  max = 5,
+  max = 6,
 }: {
   value: string[]
   onChange: (urls: string[]) => void
@@ -30,14 +31,34 @@ export function MediaPicker({
     onChange(next)
   })
 
-  function toggle(url: string) {
-    if (value.includes(url)) onChange(value.filter((u) => u !== url))
-    else if (value.length < max) onChange([...value, url])
+  const nameOf = (url: string) => assets?.find((a) => a.url === url)?.name ?? url
+  const available = (assets ?? []).filter((a) => !value.includes(a.url))
+
+  function addByUrl(url: string) {
+    if (url && !value.includes(url) && value.length < max) onChange([...value, url])
   }
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
+        <Select
+          aria-label="Add image from library"
+          value=""
+          disabled={value.length >= max || available.length === 0}
+          onChange={(e) => addByUrl(e.target.value)}
+          className="min-w-0 flex-1"
+        >
+          <option value="">
+            {value.length >= max
+              ? `Maximum ${max} images`
+              : available.length
+                ? "Choose an image from the library…"
+                : "Library is empty — upload or sync"}
+          </option>
+          {available.map((a) => (
+            <option key={a.id} value={a.url}>{a.name}</option>
+          ))}
+        </Select>
         <input
           ref={fileRef}
           type="file"
@@ -51,50 +72,41 @@ export function MediaPicker({
           }}
         />
         <Button type="button" variant="secondary" size="sm" onClick={() => fileRef.current?.click()} loading={isUploading}>
-          <Plus className="h-3.5 w-3.5" /> Upload new
+          <Plus className="h-3.5 w-3.5" /> Upload
         </Button>
         <Button type="button" variant="ghost" size="sm" onClick={() => sync.mutate()} loading={sync.isPending}>
-          <RefreshCw className="h-3.5 w-3.5" /> Sync UploadThing
+          <RefreshCw className="h-3.5 w-3.5" /> Sync
         </Button>
-        <Link href="/media" className="text-xs text-muted-foreground underline-offset-2 hover:underline">
-          Manage library
-        </Link>
-        <span className="ml-auto text-xs text-muted-foreground">{value.length}/{max} selected</span>
       </div>
 
-      {(assets?.length ?? 0) === 0 ? (
-        <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
-          Library is empty — upload an image or sync from UploadThing.
-        </p>
-      ) : (
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-          {assets!.map((a) => {
-            const selected = value.includes(a.url)
-            const order = value.indexOf(a.url) + 1
-            return (
+      <div className="flex items-center justify-between">
+        <Link href="/media" className="text-xs text-muted-foreground underline-offset-2 hover:underline">
+          Manage library &amp; rename images
+        </Link>
+        <span className="text-xs text-muted-foreground">{value.length}/{max} selected</span>
+      </div>
+
+      {value.length > 0 && (
+        <ul className="space-y-1.5">
+          {value.map((url, i) => (
+            <li key={url} className="flex items-center gap-2 rounded-lg border border-border bg-card px-2 py-1.5">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-bold text-muted-foreground">
+                {i + 1}
+              </span>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={url} alt="" className="h-8 w-8 shrink-0 rounded object-cover" />
+              <span className="min-w-0 flex-1 truncate text-sm text-foreground">{nameOf(url)}</span>
               <button
-                key={a.id}
                 type="button"
-                onClick={() => toggle(a.url)}
-                title={a.name}
-                className={`relative aspect-square overflow-hidden rounded-lg border-2 transition-colors ${
-                  selected ? "border-primary" : "border-transparent hover:border-border"
-                }`}
+                onClick={() => onChange(value.filter((u) => u !== url))}
+                className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="Remove image"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={a.url} alt={a.name} className="h-full w-full object-cover" />
-                {selected && (
-                  <span className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-black">
-                    {order}
-                  </span>
-                )}
-                <span className="absolute inset-x-0 bottom-0 truncate bg-black/55 px-1 py-0.5 text-[10px] text-white">
-                  {a.name}
-                </span>
+                <X className="h-4 w-4" />
               </button>
-            )
-          })}
-        </div>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   )
