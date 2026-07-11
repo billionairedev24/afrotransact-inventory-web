@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { ChevronLeft, X, Plus } from "lucide-react"
@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/Button"
 import { FieldLabel, Input, Select, Textarea } from "@/components/ui/Input"
 import { useCreateFullProduct, useLocations, useCategories, type NewVariantInput } from "@/lib/queries"
 import type { ProductStatus } from "@/lib/api"
-import { useUploadThing } from "@/lib/uploadthing"
+import { MediaPicker } from "@/components/media/MediaPicker"
 
 const MAX_IMAGES = 3
 
@@ -51,39 +51,7 @@ export default function NewProductPage() {
   const [metaTitle, setMetaTitle] = useState("")
   const [metaDescription, setMetaDescription] = useState("")
   const [imageUrls, setImageUrls] = useState<string[]>([])
-  const [imgDraft, setImgDraft] = useState("")
-  const [uploadError, setUploadError] = useState<string | null>(null)
   const [variants, setVariants] = useState<VariantRow[]>([emptyVariant()])
-  const fileInputRef = useRef<HTMLInputElement>(null)
-
-  // Image upload — same manual pattern the AfroTransact storefront uses
-  // (useUploadThing + startUpload + a plain file input). Reliable across
-  // browsers; no <UploadDropzone> component involved.
-  const { startUpload, isUploading } = useUploadThing("productImage", {
-    onClientUploadComplete: (res) => {
-      const urls = (res ?? [])
-        .map((f) => {
-          const r = f as unknown as { ufsUrl?: string; url?: string; key?: string }
-          return r.ufsUrl || r.url || (r.key ? `https://utfs.io/f/${r.key}` : "")
-        })
-        .filter(Boolean)
-      setImageUrls((xs) => [...xs, ...urls].slice(0, MAX_IMAGES))
-      setUploadError(null)
-    },
-    onUploadError: (err) => setUploadError(err.message || "Upload failed"),
-  })
-
-  async function handleFiles(e: React.ChangeEvent<HTMLInputElement>) {
-    const picked = Array.from(e.target.files ?? [])
-    e.target.value = "" // allow re-selecting the same file
-    if (picked.length === 0) return
-    const room = MAX_IMAGES - imageUrls.length
-    if (room <= 0) return
-    const images = picked.filter((f) => f.type.startsWith("image/")).slice(0, room)
-    if (images.length === 0) { setUploadError("Please choose image files."); return }
-    setUploadError(null)
-    await startUpload(images)
-  }
 
   // Default the location to the first warehouse once loaded.
   const resolvedLocation = locationId || locations?.[0]?.id || ""
@@ -225,79 +193,11 @@ export default function NewProductPage() {
 
         <Card>
           <CardHeader>Images <span className="font-normal text-muted-foreground">(up to {MAX_IMAGES})</span></CardHeader>
-          <CardBody className="space-y-3">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={handleFiles}
-            />
-            {imageUrls.length < MAX_IMAGES ? (
-              <button
-                type="button"
-                disabled={isUploading}
-                onClick={() => fileInputRef.current?.click()}
-                className="flex w-full flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-border px-4 py-8 text-sm text-muted-foreground transition-colors hover:border-primary hover:text-foreground disabled:opacity-60"
-              >
-                {isUploading ? (
-                  <span>Uploading…</span>
-                ) : (
-                  <>
-                    <Plus className="h-5 w-5" />
-                    <span>Click to upload images</span>
-                    <span className="text-xs">PNG, JPG or WebP · up to {MAX_IMAGES} · {MAX_IMAGES - imageUrls.length} left</span>
-                  </>
-                )}
-              </button>
-            ) : (
-              <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
-                Maximum of {MAX_IMAGES} images reached. Remove one to add another.
-              </p>
-            )}
-            {uploadError && <p className="text-xs text-red-600">{uploadError}</p>}
-            <div className="flex gap-2">
-              <Input
-                value={imgDraft}
-                onChange={(e) => setImgDraft(e.target.value)}
-                placeholder="…or paste an image URL"
-                disabled={imageUrls.length >= MAX_IMAGES}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault()
-                    const u = imgDraft.trim()
-                    if (u) { setImageUrls((xs) => (xs.length >= MAX_IMAGES ? xs : [...xs, u])); setImgDraft("") }
-                  }
-                }}
-              />
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={imageUrls.length >= MAX_IMAGES}
-                onClick={() => { const u = imgDraft.trim(); if (u) { setImageUrls((xs) => (xs.length >= MAX_IMAGES ? xs : [...xs, u])); setImgDraft("") } }}
-              >
-                Add URL
-              </Button>
-            </div>
-            {imageUrls.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {imageUrls.map((u, i) => (
-                  <div key={i} className="relative h-20 w-20 overflow-hidden rounded-lg border border-border">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={u} alt="" className="h-full w-full object-cover" />
-                    <button
-                      type="button"
-                      onClick={() => setImageUrls((xs) => xs.filter((_, idx) => idx !== i))}
-                      className="absolute right-0.5 top-0.5 rounded bg-black/60 p-0.5 text-white"
-                      aria-label="Remove image"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+          <CardBody>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Pick from your media library or upload new — images are named and reusable across products.
+            </p>
+            <MediaPicker value={imageUrls} onChange={setImageUrls} max={MAX_IMAGES} />
           </CardBody>
         </Card>
 

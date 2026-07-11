@@ -9,6 +9,7 @@ import {
   Box,
   ClipboardCheck,
   LayoutDashboard,
+  ImageIcon,
   LogOut,
   RotateCcw,
   Send,
@@ -34,6 +35,7 @@ const NAV: NavItem[] = [
   // (Products). The marketplace catalog is derived automatically from
   // inventory events, so no separate "Catalog" authoring surface here.
   { href: "/products",     label: "Products",      icon: Box },
+  { href: "/media",        label: "Media",         icon: ImageIcon },
   { href: "/stock",        label: "Stock",         icon: Warehouse },
   { href: "/receiving",    label: "Receiving",     icon: Truck },
   { href: "/pick-tasks",   label: "Pick queue",    icon: Send },

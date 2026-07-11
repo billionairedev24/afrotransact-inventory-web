@@ -83,6 +83,26 @@ export interface Category {
   parent_id?: string | null
 }
 
+export interface MediaAsset {
+  id: string
+  url: string
+  ut_key?: string
+  name: string
+  content_type?: string
+  size_bytes?: number
+  uploaded_by?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface MediaAssetInput {
+  url: string
+  ut_key?: string
+  name?: string
+  content_type?: string
+  size_bytes?: number
+}
+
 export interface ProductFullRequest {
   title: string
   description?: string
@@ -423,6 +443,32 @@ export const api = {
   // Soft delete — retires the product and removes it from the storefront/search.
   deleteProduct: (id: string) =>
     request<{ status: string }>(`/api/v1/products/${id}`, {
+      method: "DELETE",
+      idempotent: true,
+    }),
+
+  // Media library
+  listMedia: () => request<MediaAsset[]>("/api/v1/media"),
+  registerMedia: (body: MediaAssetInput) =>
+    request<MediaAsset>("/api/v1/media", {
+      method: "POST",
+      body: JSON.stringify(body),
+      idempotent: true,
+    }),
+  bulkUpsertMedia: (assets: MediaAssetInput[]) =>
+    request<MediaAsset[]>("/api/v1/media/bulk", {
+      method: "POST",
+      body: JSON.stringify({ assets }),
+      idempotent: true,
+    }),
+  renameMedia: (id: string, name: string) =>
+    request<MediaAsset>(`/api/v1/media/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+      idempotent: true,
+    }),
+  deleteMedia: (id: string) =>
+    request<void>(`/api/v1/media/${id}`, {
       method: "DELETE",
       idempotent: true,
     }),

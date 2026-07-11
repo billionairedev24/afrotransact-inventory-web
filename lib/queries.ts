@@ -24,6 +24,8 @@ import {
   type CycleCountStatus,
   type Category,
   type Location,
+  type MediaAsset,
+  type MediaAssetInput,
   type Movement,
   type PickTask,
   type PickTaskState,
@@ -48,6 +50,7 @@ export const keys = {
   product:            (id: string) => ["products", id] as const,
   locations:          () => ["locations"] as const,
   categories:         () => ["categories"] as const,
+  media:              () => ["media"] as const,
   stock:              () => ["stock"] as const,
   pickTasks:          (states?: PickTaskState[]) => ["pick-tasks", states ?? "all"] as const,
   pickTask:           (id: string) => ["pick-tasks", id] as const,
@@ -93,6 +96,68 @@ export function useCategories() {
       return Array.isArray(res) ? res : (res?.content ?? [])
     },
     staleTime: 10 * 60_000,
+  })
+}
+
+// ─── Media library ───────────────────────────────────────────────────────────
+
+export function useMedia() {
+  return useQuery<MediaAsset[]>({
+    queryKey: keys.media(),
+    queryFn: api.listMedia,
+    staleTime: 30_000,
+  })
+}
+
+export function useRegisterMedia() {
+  const qc = useQueryClient()
+  return useMutation<MediaAsset, ApiError, MediaAssetInput>({
+    mutationFn: (input) => api.registerMedia(input),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.media() }),
+    onError: toastError("Could not save image"),
+  })
+}
+
+export function useRenameMedia() {
+  const qc = useQueryClient()
+  return useMutation<MediaAsset, ApiError, { id: string; name: string }>({
+    mutationFn: ({ id, name }) => api.renameMedia(id, name),
+    onSuccess: () => {
+      toast.success("Renamed")
+      void qc.invalidateQueries({ queryKey: keys.media() })
+    },
+    onError: toastError("Could not rename"),
+  })
+}
+
+export function useDeleteMedia() {
+  const qc = useQueryClient()
+  return useMutation<void, ApiError, string>({
+    mutationFn: (id) => api.deleteMedia(id),
+    onSuccess: () => {
+      toast.success("Removed from library")
+      void qc.invalidateQueries({ queryKey: keys.media() })
+    },
+    onError: toastError("Could not remove"),
+  })
+}
+
+/** Imports every file from the shared UploadThing app into the library (idempotent). */
+export function useSyncMediaFromUploadThing() {
+  const qc = useQueryClient()
+  return useMutation<{ imported: number }, ApiError, void>({
+    mutationFn: async () => {
+      const res = await fetch("/api/media/sync", { method: "POST" })
+      if (!res.ok) throw { status: res.status, code: "sync_failed", detail: await res.text() } as ApiError
+      const files = (await res.json()) as MediaAssetInput[]
+      const saved = files.length ? await api.bulkUpsertMedia(files) : []
+      return { imported: saved.length }
+    },
+    onSuccess: ({ imported }) => {
+      toast.success(`Synced ${imported} image${imported === 1 ? "" : "s"} from UploadThing`)
+      void qc.invalidateQueries({ queryKey: keys.media() })
+    },
+    onError: toastError("UploadThing sync failed"),
   })
 }
 
