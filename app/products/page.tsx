@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { Table, TableKbdHint } from "@/components/ui/Table"
-import { useProducts } from "@/lib/queries"
+import { useProducts, useDeleteProducts } from "@/lib/queries"
 import type { ProductStatus, Product } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { useListNav } from "@/hooks/useListNav"
@@ -23,6 +23,7 @@ const STATUS_TONE: Record<ProductStatus, "neutral" | "success" | "warning"> = {
 
 export default function ProductsPage() {
   const { data, isLoading, isError, error } = useProducts()
+  const del = useDeleteProducts()
   const [q, setQ] = useState("")
   const term = q.trim().toLowerCase()
   const rows: Product[] = (data ?? []).filter(
@@ -38,18 +39,35 @@ export default function ProductsPage() {
     <AppShell>
       <PageHeader
         title="Products"
-        subtitle="Offers AT-Inv stocks. Pick from the platform catalog for the Amazon-style flow; legacy 'new product' kept while we cut over."
+        subtitle="AfroTransact's products. Create one — with its variants and stock — and it goes live on the storefront automatically."
         actions={
           <div className="flex items-center gap-2">
-            <Link href="/products/from-catalog">
+            <Link href="/products/new">
               <Button>
                 <Plus className="h-4 w-4" />
-                From catalog
+                New product
               </Button>
             </Link>
-            <Link href="/products/new">
-              <Button variant="secondary">Legacy: new product</Button>
+            <Link href="/products/bulk">
+              <Button variant="secondary">Bulk add</Button>
             </Link>
+            {(data?.length ?? 0) > 0 && (
+              <Button
+                variant="danger"
+                loading={del.isPending}
+                onClick={() => {
+                  const ids = (data ?? []).map((p) => p.id)
+                  if (
+                    window.confirm(
+                      `Delete ALL ${ids.length} products? They'll be retired and removed from the storefront and search.`,
+                    )
+                  )
+                    del.mutate(ids)
+                }}
+              >
+                Delete all
+              </Button>
+            )}
           </div>
         }
       />
@@ -105,15 +123,23 @@ export default function ProductsPage() {
           bulkActions={(selected, clear) => (
             <Button
               size="sm"
-              variant="secondary"
+              variant="danger"
+              loading={del.isPending}
               onClick={() => {
-                // Bulk-publish stub. Real impl would call useUpdateProduct
-                // per row inside a Promise.all + invalidate products list.
-                alert(`Would publish ${selected.length} products`)
-                clear()
+                if (
+                  !window.confirm(
+                    `Delete ${selected.length} product${selected.length === 1 ? "" : "s"}? ` +
+                      "They'll be retired and removed from the storefront and search.",
+                  )
+                )
+                  return
+                del.mutate(
+                  selected.map((p) => p.id),
+                  { onSuccess: () => clear() },
+                )
               }}
             >
-              Publish
+              Delete
             </Button>
           )}
           rowActions={[
@@ -124,6 +150,10 @@ export default function ProductsPage() {
             { label: "Open on storefront", onSelect: (p) => {
               const base = process.env.NEXT_PUBLIC_AFROTRANSACT_URL ?? "https://afrotransact.com"
               window.open(`${base}/product/${p.id}`, "_blank")
+            } },
+            { label: "Delete", onSelect: (p) => {
+              if (window.confirm(`Delete "${p.title}"? It'll be retired and removed from the storefront and search.`))
+                del.mutate([p.id])
             } },
           ]}
           footer={<TableKbdHint />}

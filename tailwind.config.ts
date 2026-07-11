@@ -44,6 +44,10 @@ export default {
           DEFAULT: "hsl(var(--brand-dark))",
           foreground: "hsl(var(--brand-dark-foreground))",
         },
+        "brand-green": {
+          DEFAULT: "hsl(var(--brand-green))",
+          foreground: "hsl(var(--brand-green-foreground))",
+        },
       },
       borderRadius: {
         xl: "0.75rem",

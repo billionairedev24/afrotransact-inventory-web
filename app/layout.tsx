@@ -8,9 +8,12 @@ export const metadata = {
 }
 
 export default function RootLayout({ children }: { children: ReactNode }) {
+  // suppressHydrationWarning: browser extensions (e.g. Storylane) inject
+  // attributes onto <html>/<body> before React hydrates, which otherwise
+  // trips a hydration mismatch warning.
   return (
-    <html lang="en">
-      <body className="min-h-screen">
+    <html lang="en" suppressHydrationWarning>
+      <body className="min-h-screen" suppressHydrationWarning>
         <Providers>{children}</Providers>
       </body>
     </html>

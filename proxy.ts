@@ -18,6 +18,10 @@ const REQUIRED_PERMISSION = "inventory:access"
 // assets, and Next internals.
 const PUBLIC_PREFIXES = [
   "/api/auth",
+  // UploadThing's completion callback is a server-to-server POST with no
+  // session cookie — gating it 307-redirects the callback and breaks uploads.
+  // The route still requires the server-side UPLOADTHING_TOKEN to do anything.
+  "/api/uploadthing",
   "/auth/signin",
   "/unauthorized",
   "/_next",

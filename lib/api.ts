@@ -69,6 +69,42 @@ export interface Variant {
   updated_at: string
 }
 
+export interface Location {
+  id: string
+  code: string
+  display_name: string
+  active: boolean
+}
+
+export interface Category {
+  id: string
+  name: string
+  slug?: string
+  parent_id?: string | null
+}
+
+export interface ProductFullRequest {
+  title: string
+  description?: string
+  sku: string
+  brand?: string
+  status: ProductStatus
+  category_ids?: string[]
+  images?: { url: string; alt_text?: string; sort_order?: number }[]
+  location_id: string
+  variants: {
+    sku: string
+    name?: string
+    cost_cents?: number
+    list_price_cents: number
+    initial_stock: number
+    weight_kg?: number
+    length_in?: number
+    width_in?: number
+    height_in?: number
+  }[]
+}
+
 export interface StockLevel {
   variant_id: string
   variant_sku: string
@@ -380,6 +416,12 @@ export const api = {
       body: JSON.stringify(body),
       idempotent: true,
     }),
+  // Soft delete — retires the product and removes it from the storefront/search.
+  deleteProduct: (id: string) =>
+    request<{ status: string }>(`/api/v1/products/${id}`, {
+      method: "DELETE",
+      idempotent: true,
+    }),
   addVariant: (productId: string, body: Partial<Variant>) =>
     request<Variant>(`/api/v1/products/${productId}/variants`, {
       method: "POST",
@@ -403,6 +445,20 @@ export const api = {
       body: JSON.stringify({ image_ids: imageIds }),
       idempotent: true,
     }),
+
+  // Atomic first-party create: product + variants + stock in one call.
+  createFullProduct: (body: ProductFullRequest) =>
+    request<Product>("/api/v1/products/full", {
+      method: "POST",
+      body: JSON.stringify(body),
+      idempotent: true,
+    }),
+
+  // Locations
+  listLocations: () => request<Location[]>("/api/v1/locations"),
+
+  // Categories (marketplace taxonomy, proxied from product-catalog)
+  listCategories: () => request<Category[] | { content: Category[] }>("/api/v1/categories"),
 
   // Stock
   listStock: () => request<StockLevel[]>("/api/v1/stock"),

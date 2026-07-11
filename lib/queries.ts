@@ -22,11 +22,14 @@ import {
   type CycleCount,
   type CycleCountRequestPayload,
   type CycleCountStatus,
+  type Category,
+  type Location,
   type Movement,
   type PickTask,
   type PickTaskState,
   type POStatus,
   type Product,
+  type ProductStatus,
   type PurchaseOrder,
   type PORequestPayload,
   type ReceiveRequestPayload,
@@ -43,6 +46,8 @@ import {
 export const keys = {
   products:           () => ["products"] as const,
   product:            (id: string) => ["products", id] as const,
+  locations:          () => ["locations"] as const,
+  categories:         () => ["categories"] as const,
   stock:              () => ["stock"] as const,
   pickTasks:          (states?: PickTaskState[]) => ["pick-tasks", states ?? "all"] as const,
   pickTask:           (id: string) => ["pick-tasks", id] as const,
@@ -72,6 +77,90 @@ export function useProduct(id: string | undefined) {
   })
 }
 
+export function useLocations() {
+  return useQuery<Location[]>({
+    queryKey: keys.locations(),
+    queryFn: api.listLocations,
+    staleTime: 5 * 60_000,
+  })
+}
+
+export function useCategories() {
+  return useQuery<Category[]>({
+    queryKey: keys.categories(),
+    queryFn: async () => {
+      const res = await api.listCategories()
+      return Array.isArray(res) ? res : (res?.content ?? [])
+    },
+    staleTime: 10 * 60_000,
+  })
+}
+
+// One variant row on the create form.
+export interface NewVariantInput {
+  sku: string
+  name?: string
+  priceCents: number
+  costCents?: number
+  initialStock: number
+  weightKg?: number
+  lengthIn?: number
+  widthIn?: number
+  heightIn?: number
+}
+
+export interface NewProductInput {
+  title: string
+  description?: string
+  sku: string
+  brand?: string
+  status: ProductStatus
+  categoryIds?: string[]
+  imageUrls?: string[]
+  locationId: string
+  variants: NewVariantInput[]
+}
+
+/**
+ * Create a fully sellable product in one action: the product, its priced
+ * variant(s), and initial stock — atomically, via POST /products/full. No
+ * catalog or separate stock step; the inventory events materialize it onto the
+ * storefront automatically.
+ */
+export function useCreateFullProduct() {
+  const qc = useQueryClient()
+  return useMutation<Product, ApiError, NewProductInput>({
+    mutationFn: (input) =>
+      api.createFullProduct({
+        title: input.title,
+        description: input.description,
+        sku: input.sku,
+        brand: input.brand,
+        status: input.status,
+        category_ids: input.categoryIds ?? [],
+        images: (input.imageUrls ?? []).map((url, i) => ({ url, sort_order: i })),
+        location_id: input.locationId,
+        variants: input.variants.map((v) => ({
+          sku: v.sku,
+          name: v.name,
+          list_price_cents: v.priceCents,
+          cost_cents: v.costCents ?? 0,
+          initial_stock: v.initialStock,
+          weight_kg: v.weightKg,
+          length_in: v.lengthIn,
+          width_in: v.widthIn,
+          height_in: v.heightIn,
+        })),
+      }),
+    onSuccess: (p) => {
+      toast.success(`Created ${p.title}`)
+      void qc.invalidateQueries({ queryKey: keys.products() })
+      void qc.invalidateQueries({ queryKey: keys.stock() })
+    },
+    onError: toastError("Could not create product"),
+  })
+}
+
 export function useCreateProduct() {
   const qc = useQueryClient()
   return useMutation<Product, ApiError, Partial<Product>>({
@@ -94,6 +183,30 @@ export function useUpdateProduct(id: string) {
       void qc.invalidateQueries({ queryKey: keys.products() })
     },
     onError: toastError("Could not update product"),
+  })
+}
+
+// Bulk soft-delete (retire). Fans out one DELETE per id; the marketplace
+// catalog + search drop them from sale via the re-emitted inv.product event.
+export function useDeleteProducts() {
+  const qc = useQueryClient()
+  return useMutation<number, ApiError, string[]>({
+    mutationFn: async (ids) => {
+      // Chunk so deleting hundreds doesn't fire hundreds of concurrent requests.
+      const BATCH = 10
+      let done = 0
+      for (let i = 0; i < ids.length; i += BATCH) {
+        await Promise.all(ids.slice(i, i + BATCH).map((id) => api.deleteProduct(id)))
+        done += Math.min(BATCH, ids.length - i)
+      }
+      return done
+    },
+    onSuccess: (count) => {
+      toast.success(`Deleted ${count} product${count === 1 ? "" : "s"}`)
+      void qc.invalidateQueries({ queryKey: keys.products() })
+      void qc.invalidateQueries({ queryKey: keys.stock() })
+    },
+    onError: toastError("Could not delete products"),
   })
 }
 

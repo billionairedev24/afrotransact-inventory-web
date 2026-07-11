@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { ChevronLeft, X, Plus } from "lucide-react"
@@ -8,212 +8,338 @@ import { AppShell, PageHeader } from "@/components/layout/AppShell"
 import { Card, CardBody, CardHeader } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
 import { FieldLabel, Input, Select, Textarea } from "@/components/ui/Input"
-import { useCreateProduct } from "@/lib/queries"
+import { useCreateFullProduct, useLocations, useCategories, type NewVariantInput } from "@/lib/queries"
 import type { ProductStatus } from "@/lib/api"
-import { Slugify } from "@/lib/slug"
+import { useUploadThing } from "@/lib/uploadthing"
 
+const MAX_IMAGES = 3
+
+type VariantRow = {
+  name: string; sku: string; price: string; qty: string
+  weight: string; length: string; width: string; height: string
+}
+
+const emptyVariant = (): VariantRow => ({
+  name: "", sku: "", price: "", qty: "", weight: "", length: "", width: "", height: "",
+})
+
+const num = (s: string): number | undefined => {
+  const n = parseFloat(s)
+  return Number.isNaN(n) ? undefined : n
+}
+
+/**
+ * Create a fully sellable AfroTransact product in one submit: the product, its
+ * priced variant(s), and initial stock. No separate catalog/offer step — the
+ * inventory events materialize it onto the storefront automatically.
+ */
 export default function NewProductPage() {
   const router = useRouter()
-  const create = useCreateProduct()
-  const [form, setForm] = useState({
-    sku: "",
-    slug: "",
-    title: "",
-    description: "",
-    brand: "",
-    status: "draft" as ProductStatus,
-    metaTitle: "",
-    metaDescription: "",
+  const create = useCreateFullProduct()
+  const { data: locations } = useLocations()
+  const { data: categories } = useCategories()
+
+  const [title, setTitle] = useState("")
+  const [sku, setSku] = useState("")
+  const [description, setDescription] = useState("")
+  const [brand, setBrand] = useState("")
+  const [status, setStatus] = useState<ProductStatus>("active")
+  const [locationId, setLocationId] = useState("")
+  const [categoryId, setCategoryId] = useState("")
+  const [imageUrls, setImageUrls] = useState<string[]>([])
+  const [imgDraft, setImgDraft] = useState("")
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [variants, setVariants] = useState<VariantRow[]>([emptyVariant()])
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Image upload — same manual pattern the AfroTransact storefront uses
+  // (useUploadThing + startUpload + a plain file input). Reliable across
+  // browsers; no <UploadDropzone> component involved.
+  const { startUpload, isUploading } = useUploadThing("productImage", {
+    onClientUploadComplete: (res) => {
+      const urls = (res ?? [])
+        .map((f) => {
+          const r = f as unknown as { ufsUrl?: string; url?: string; key?: string }
+          return r.ufsUrl || r.url || (r.key ? `https://utfs.io/f/${r.key}` : "")
+        })
+        .filter(Boolean)
+      setImageUrls((xs) => [...xs, ...urls].slice(0, MAX_IMAGES))
+      setUploadError(null)
+    },
+    onUploadError: (err) => setUploadError(err.message || "Upload failed"),
   })
-  const [tags, setTags] = useState<string[]>([])
-  const [tagDraft, setTagDraft] = useState("")
-  const [highlights, setHighlights] = useState<string[]>([])
-  const [highlightDraft, setHighlightDraft] = useState("")
-  const [categoryIds, setCategoryIds] = useState<string[]>([])
-  const [categoryDraft, setCategoryDraft] = useState("")
 
-  // Auto-derive slug from SKU when the slug field is empty.
-  function onSkuChange(v: string) {
-    setForm((f) => ({
-      ...f,
-      sku: v,
-      slug: f.slug === "" || f.slug === Slugify(f.sku) ? Slugify(v) : f.slug,
-    }))
+  async function handleFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const picked = Array.from(e.target.files ?? [])
+    e.target.value = "" // allow re-selecting the same file
+    if (picked.length === 0) return
+    const room = MAX_IMAGES - imageUrls.length
+    if (room <= 0) return
+    const images = picked.filter((f) => f.type.startsWith("image/")).slice(0, room)
+    if (images.length === 0) { setUploadError("Please choose image files."); return }
+    setUploadError(null)
+    await startUpload(images)
   }
 
-  function addTag() {
-    const t = tagDraft.trim()
-    if (!t || tags.includes(t)) return
-    setTags((xs) => [...xs, t])
-    setTagDraft("")
-  }
-  function addHighlight() {
-    const t = highlightDraft.trim()
-    if (!t) return
-    setHighlights((xs) => [...xs, t])
-    setHighlightDraft("")
-  }
-  function addCategory() {
-    const t = categoryDraft.trim()
-    if (!t || categoryIds.includes(t)) return
-    setCategoryIds((xs) => [...xs, t])
-    setCategoryDraft("")
+  // Default the location to the first warehouse once loaded.
+  const resolvedLocation = locationId || locations?.[0]?.id || ""
+
+  function setVariant(i: number, patch: Partial<VariantRow>) {
+    setVariants((vs) => vs.map((v, idx) => (idx === i ? { ...v, ...patch } : v)))
   }
 
-  async function submit(e: React.FormEvent) {
+  function submit(e: React.FormEvent) {
     e.preventDefault()
-    const product = await create.mutateAsync({
-      sku: form.sku.trim(),
-      slug: form.slug.trim(),
-      title: form.title.trim(),
-      description: form.description.trim(),
-      brand: form.brand.trim() || undefined,
-      status: form.status,
-      tags,
-      highlights,
-      category_ids: categoryIds,
-      meta_title: form.metaTitle.trim() || undefined,
-      meta_description: form.metaDescription.trim() || undefined,
-    })
-    router.push(`/products/${product.id}`)
+    if (!resolvedLocation) {
+      alert("No warehouse location found. Create one before adding stock.")
+      return
+    }
+    const parsed: NewVariantInput[] = variants
+      .filter((v) => v.sku.trim())
+      .map((v) => ({
+        sku: v.sku.trim(),
+        name: v.name.trim() || undefined,
+        priceCents: Math.round(parseFloat(v.price || "0") * 100),
+        initialStock: parseInt(v.qty || "0", 10) || 0,
+        weightKg: num(v.weight),
+        lengthIn: num(v.length),
+        widthIn: num(v.width),
+        heightIn: num(v.height),
+      }))
+    if (parsed.length === 0) {
+      alert("Add at least one variant with a SKU.")
+      return
+    }
+    create.mutate(
+      {
+        title: title.trim(),
+        description: description.trim() || undefined,
+        sku: sku.trim() || parsed[0].sku,
+        brand: brand.trim() || undefined,
+        status,
+        categoryIds: categoryId ? [categoryId] : undefined,
+        imageUrls,
+        locationId: resolvedLocation,
+        variants: parsed,
+      },
+      { onSuccess: () => router.push("/products") },
+    )
   }
 
   return (
     <AppShell>
-      <Link
-        href="/products"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-3"
-      >
-        <ChevronLeft className="h-4 w-4" /> Products
-      </Link>
-      <PageHeader title="New product" subtitle="Add a SKU to the house catalog." />
+      <div className="mb-4">
+        <Link href="/products" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <ChevronLeft className="h-4 w-4" /> Back to products
+        </Link>
+      </div>
+      <PageHeader title="New product" subtitle="Create a product, its variants, and stock — it goes live on the storefront automatically." />
 
-      <form onSubmit={submit} className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-6">
-        <div className="space-y-6">
-          <Card>
-            <CardHeader><h2 className="text-base font-semibold">Basics</h2></CardHeader>
-            <CardBody className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <FieldLabel htmlFor="sku">SKU</FieldLabel>
-                  <Input id="sku" required value={form.sku} onChange={(e) => onSkuChange(e.target.value)} placeholder="AT-YAM-001" />
-                </div>
-                <div>
-                  <FieldLabel htmlFor="slug">Slug</FieldLabel>
-                  <Input id="slug" value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} placeholder="auto from SKU" />
-                </div>
-              </div>
+      <form onSubmit={submit} className="max-w-3xl space-y-4">
+        <Card>
+          <CardHeader>Product</CardHeader>
+          <CardBody className="space-y-4">
+            <div>
+              <FieldLabel htmlFor="title">Title</FieldLabel>
+              <Input id="title" required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Premium Nigerian Rice" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <FieldLabel htmlFor="title">Title</FieldLabel>
-                <Input id="title" required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Premium Nigerian Yam" />
+                <FieldLabel htmlFor="sku">Product SKU</FieldLabel>
+                <Input id="sku" value={sku} onChange={(e) => setSku(e.target.value)} placeholder="RICE-PREMIUM (defaults to 1st variant)" />
               </div>
               <div>
                 <FieldLabel htmlFor="brand">Brand</FieldLabel>
-                <Input id="brand" value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} placeholder="(optional)" />
+                <Input id="brand" value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="(optional)" />
+              </div>
+            </div>
+            <div>
+              <FieldLabel htmlFor="desc">Description</FieldLabel>
+              <Textarea id="desc" rows={5} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What buyers read on the listing page." />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <FieldLabel htmlFor="status">Status</FieldLabel>
+                <Select id="status" value={status} onChange={(e) => setStatus(e.target.value as ProductStatus)}>
+                  <option value="active">Active — visible to buyers</option>
+                  <option value="draft">Draft — not visible</option>
+                </Select>
               </div>
               <div>
-                <FieldLabel htmlFor="desc">Description</FieldLabel>
-                <Textarea id="desc" rows={6} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What buyers will read on the listing page." />
+                <FieldLabel htmlFor="loc">Warehouse</FieldLabel>
+                <Select id="loc" value={resolvedLocation} onChange={(e) => setLocationId(e.target.value)}>
+                  {(locations ?? []).map((l) => (
+                    <option key={l.id} value={l.id}>{l.display_name} ({l.code})</option>
+                  ))}
+                </Select>
               </div>
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader><h2 className="text-base font-semibold">Highlights</h2></CardHeader>
-            <CardBody className="space-y-3">
-              <p className="text-xs text-muted-foreground">
-                Selling-point bullets shown on the PDP. Add one at a time.
-              </p>
-              <div className="flex gap-2">
-                <Input value={highlightDraft} onChange={(e) => setHighlightDraft(e.target.value)} placeholder="e.g. Grown in Abuja, harvested weekly" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addHighlight())} />
-                <Button type="button" variant="secondary" size="sm" onClick={addHighlight}><Plus className="h-3.5 w-3.5" /></Button>
-              </div>
-              <ul className="space-y-1.5">
-                {highlights.map((h, i) => (
-                  <li key={i} className="flex items-center gap-2 rounded-xl bg-muted/40 px-3 py-2 text-sm">
-                    <span className="flex-1">{h}</span>
-                    <button type="button" onClick={() => setHighlights((xs) => xs.filter((_, idx) => idx !== i))} className="text-muted-foreground hover:text-foreground">
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </li>
+            </div>
+            <div>
+              <FieldLabel htmlFor="cat">Category (optional)</FieldLabel>
+              <Select id="cat" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+                <option value="">— none —</option>
+                {(categories ?? []).map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
-              </ul>
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader><h2 className="text-base font-semibold">Search & SEO</h2></CardHeader>
-            <CardBody className="space-y-4">
-              <div>
-                <FieldLabel htmlFor="tag">Tags</FieldLabel>
-                <div className="flex gap-2">
-                  <Input id="tag" value={tagDraft} onChange={(e) => setTagDraft(e.target.value)} placeholder="yam, food, abuja" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addTag())} />
-                  <Button type="button" variant="secondary" size="sm" onClick={addTag}><Plus className="h-3.5 w-3.5" /></Button>
-                </div>
-                {tags.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {tags.map((t) => (
-                      <span key={t} className="inline-flex items-center gap-1 rounded-full bg-brand-gold/20 px-2.5 py-0.5 text-xs font-medium">
-                        {t}
-                        <button type="button" onClick={() => setTags((xs) => xs.filter((x) => x !== t))} className="hover:text-foreground">
-                          <X className="h-3 w-3" />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div>
-                <FieldLabel htmlFor="mtitle">Meta title</FieldLabel>
-                <Input id="mtitle" value={form.metaTitle} onChange={(e) => setForm({ ...form, metaTitle: e.target.value })} placeholder="(falls back to title)" />
-              </div>
-              <div>
-                <FieldLabel htmlFor="mdesc">Meta description</FieldLabel>
-                <Textarea id="mdesc" rows={3} value={form.metaDescription} onChange={(e) => setForm({ ...form, metaDescription: e.target.value })} placeholder="(falls back to description)" />
-              </div>
-            </CardBody>
-          </Card>
-        </div>
-
-        <div className="space-y-6">
-          <Card>
-            <CardHeader><h2 className="text-base font-semibold">Status</h2></CardHeader>
-            <CardBody>
-              <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as ProductStatus })}>
-                <option value="draft">Draft — not visible</option>
-                <option value="active">Active — visible to buyers</option>
-                <option value="retired">Retired</option>
               </Select>
-            </CardBody>
-          </Card>
+            </div>
+          </CardBody>
+        </Card>
 
-          <Card>
-            <CardHeader><h2 className="text-base font-semibold">Categories</h2></CardHeader>
-            <CardBody className="space-y-2">
-              <p className="text-xs text-muted-foreground">
-                AfroTransact category UUIDs. Use the storefront admin to look these up.
+        <Card>
+          <CardHeader>Images <span className="font-normal text-muted-foreground">(up to {MAX_IMAGES})</span></CardHeader>
+          <CardBody className="space-y-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handleFiles}
+            />
+            {imageUrls.length < MAX_IMAGES ? (
+              <button
+                type="button"
+                disabled={isUploading}
+                onClick={() => fileInputRef.current?.click()}
+                className="flex w-full flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-border px-4 py-8 text-sm text-muted-foreground transition-colors hover:border-primary hover:text-foreground disabled:opacity-60"
+              >
+                {isUploading ? (
+                  <span>Uploading…</span>
+                ) : (
+                  <>
+                    <Plus className="h-5 w-5" />
+                    <span>Click to upload images</span>
+                    <span className="text-xs">PNG, JPG or WebP · up to {MAX_IMAGES} · {MAX_IMAGES - imageUrls.length} left</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
+                Maximum of {MAX_IMAGES} images reached. Remove one to add another.
               </p>
-              <div className="flex gap-2">
-                <Input value={categoryDraft} onChange={(e) => setCategoryDraft(e.target.value)} placeholder="UUID" className="font-mono text-xs" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addCategory())} />
-                <Button type="button" variant="secondary" size="sm" onClick={addCategory}><Plus className="h-3.5 w-3.5" /></Button>
-              </div>
-              <ul className="space-y-1">
-                {categoryIds.map((c) => (
-                  <li key={c} className="flex items-center gap-2 rounded-lg bg-muted/40 px-2.5 py-1.5 text-[11px] font-mono">
-                    <span className="flex-1 truncate">{c}</span>
-                    <button type="button" onClick={() => setCategoryIds((xs) => xs.filter((x) => x !== c))} className="text-muted-foreground hover:text-foreground">
+            )}
+            {uploadError && <p className="text-xs text-red-600">{uploadError}</p>}
+            <div className="flex gap-2">
+              <Input
+                value={imgDraft}
+                onChange={(e) => setImgDraft(e.target.value)}
+                placeholder="…or paste an image URL"
+                disabled={imageUrls.length >= MAX_IMAGES}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    const u = imgDraft.trim()
+                    if (u) { setImageUrls((xs) => (xs.length >= MAX_IMAGES ? xs : [...xs, u])); setImgDraft("") }
+                  }
+                }}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={imageUrls.length >= MAX_IMAGES}
+                onClick={() => { const u = imgDraft.trim(); if (u) { setImageUrls((xs) => (xs.length >= MAX_IMAGES ? xs : [...xs, u])); setImgDraft("") } }}
+              >
+                Add URL
+              </Button>
+            </div>
+            {imageUrls.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {imageUrls.map((u, i) => (
+                  <div key={i} className="relative h-20 w-20 overflow-hidden rounded-lg border border-border">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={u} alt="" className="h-full w-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => setImageUrls((xs) => xs.filter((_, idx) => idx !== i))}
+                      className="absolute right-0.5 top-0.5 rounded bg-black/60 p-0.5 text-white"
+                      aria-label="Remove image"
+                    >
                       <X className="h-3 w-3" />
                     </button>
-                  </li>
+                  </div>
                 ))}
-              </ul>
-            </CardBody>
-          </Card>
+              </div>
+            )}
+          </CardBody>
+        </Card>
 
-          <div className="flex items-center gap-3">
-            <Button type="submit" loading={create.isPending}>Create product</Button>
-            <Link href="/products"><Button type="button" variant="ghost">Cancel</Button></Link>
-          </div>
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <span>Variants &amp; stock</span>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setVariants((vs) => [...vs, emptyVariant()])}>
+                <Plus className="h-3.5 w-3.5" /> Add variant
+              </Button>
+            </div>
+          </CardHeader>
+          <CardBody className="space-y-3">
+            {variants.map((v, i) => (
+              <div key={i} className="rounded-xl border border-border p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-muted-foreground">Variant {i + 1}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={variants.length === 1}
+                    onClick={() => setVariants((vs) => vs.filter((_, idx) => idx !== i))}
+                    aria-label="Remove variant"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div>
+                    <FieldLabel htmlFor={`vn${i}`}>Name</FieldLabel>
+                    <Input id={`vn${i}`} value={v.name} onChange={(e) => setVariant(i, { name: e.target.value })} placeholder="5kg bag" />
+                  </div>
+                  <div>
+                    <FieldLabel htmlFor={`vs${i}`}>SKU</FieldLabel>
+                    <Input id={`vs${i}`} value={v.sku} onChange={(e) => setVariant(i, { sku: e.target.value })} placeholder="RICE-5KG" className="font-mono text-xs" />
+                  </div>
+                  <div>
+                    <FieldLabel htmlFor={`vp${i}`}>Price ($)</FieldLabel>
+                    <Input id={`vp${i}`} type="number" min="0" step="0.01" value={v.price} onChange={(e) => setVariant(i, { price: e.target.value })} placeholder="19.99" />
+                  </div>
+                  <div>
+                    <FieldLabel htmlFor={`vq${i}`}>Qty in stock</FieldLabel>
+                    <Input id={`vq${i}`} type="number" min="0" step="1" value={v.qty} onChange={(e) => setVariant(i, { qty: e.target.value })} placeholder="100" />
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-1.5 text-xs font-medium text-muted-foreground">Packaging — used for shipping rates</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div>
+                      <FieldLabel htmlFor={`vw${i}`}>Weight (kg)</FieldLabel>
+                      <Input id={`vw${i}`} type="number" min="0" step="0.001" value={v.weight} onChange={(e) => setVariant(i, { weight: e.target.value })} placeholder="18.14" />
+                    </div>
+                    <div>
+                      <FieldLabel htmlFor={`vl${i}`}>Length (in)</FieldLabel>
+                      <Input id={`vl${i}`} type="number" min="0" step="0.1" value={v.length} onChange={(e) => setVariant(i, { length: e.target.value })} placeholder="12" />
+                    </div>
+                    <div>
+                      <FieldLabel htmlFor={`vwd${i}`}>Width (in)</FieldLabel>
+                      <Input id={`vwd${i}`} type="number" min="0" step="0.1" value={v.width} onChange={(e) => setVariant(i, { width: e.target.value })} placeholder="9" />
+                    </div>
+                    <div>
+                      <FieldLabel htmlFor={`vh${i}`}>Height (in)</FieldLabel>
+                      <Input id={`vh${i}`} type="number" min="0" step="0.1" value={v.height} onChange={(e) => setVariant(i, { height: e.target.value })} placeholder="6" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+            <p className="text-xs text-muted-foreground">
+              Each variant is one buyable option (size/weight) with its own SKU, price, and quantity.
+              Quantity is received into the selected warehouse.
+            </p>
+          </CardBody>
+        </Card>
+
+        <div className="flex items-center gap-2">
+          <Button type="submit" loading={create.isPending}>Create product</Button>
+          <Link href="/products"><Button type="button" variant="ghost">Cancel</Button></Link>
         </div>
       </form>
     </AppShell>
