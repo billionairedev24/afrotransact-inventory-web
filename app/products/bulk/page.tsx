@@ -3,30 +3,55 @@
 import { useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import {
-  ChevronLeft, UploadCloud, FileText, Download, CheckCircle2, AlertTriangle, X, Loader2,
+  ChevronLeft, UploadCloud, FileText, Download, CheckCircle2, AlertTriangle, X,
 } from "lucide-react"
 import { AppShell, PageHeader } from "@/components/layout/AppShell"
 import { Card, CardBody, CardHeader } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
 import { FieldLabel, Select } from "@/components/ui/Input"
-import { useCreateFullProduct, useLocations } from "@/lib/queries"
+import { useCreateFullProduct, useLocations, useCategories } from "@/lib/queries"
 
-const TEMPLATE = `title,sku,price,qty
-Premium Nigerian Rice,RICE-5KG,19.99,100
-Jollof Spice Mix,SPICE-JLF,6.50,250
-Palm Oil 1L,OIL-PALM-1L,8.00,60`
+// One product (single variant) per row. Header-based so columns can be in any
+// order; unknown columns are ignored. cost/price are in dollars, weight in lb,
+// dimensions in inches, tags are semicolon-separated (commas are the delimiter).
+const COLUMNS = [
+  "title", "sku", "cost", "price", "qty",
+  "description", "brand", "category", "tags", "variant_name",
+  "weight_lb", "length_in", "width_in", "height_in",
+] as const
+
+const TEMPLATE = [
+  "title,sku,cost,price,qty,description,brand,category,tags,variant_name,weight_lb,length_in,width_in,height_in",
+  'Premium Nigerian Rice,RICE-5KG,12.00,19.99,100,"Long-grain parboiled rice, stone-free.",Mama Gold,Food & Grocery,rice;staple;party-size,5kg bag,11,16,11,5',
+  "Jollof Spice Mix,SPICE-JLF,3.10,6.50,250,Ready-blend jollof seasoning.,AfroTaste,Food & Grocery,spice;jollof,100g pouch,0.25,5,4,1",
+  "Palm Oil 1L,OIL-PALM-1L,4.20,8.00,60,Pure red palm oil.,,Food & Grocery,oil;cooking,1L bottle,2.4,4,4,10",
+].join("\n")
+
+const LBS_TO_KG = 0.45359237
+const lbToKg = (lb: number | undefined) =>
+  lb === undefined || Number.isNaN(lb) ? undefined : Math.round(lb * LBS_TO_KG * 1000) / 1000
 
 type ParsedRow = {
   line: number
   title: string
   sku: string
+  cost: number
   price: number
   qty: number
+  description: string
+  brand: string
+  category: string
+  tags: string[]
+  variantName: string
+  weightLb?: number
+  lengthIn?: number
+  widthIn?: number
+  heightIn?: number
   error?: string
 }
 type ImportResult = { sku: string; title: string; ok: boolean; error?: string }
 
-/** Minimal CSV line parser — handles quoted fields and escaped quotes. */
+/** CSV line parser — handles quoted fields and escaped quotes. */
 function parseLine(line: string): string[] {
   const out: string[] = []
   let cur = "", q = false
@@ -43,25 +68,58 @@ function parseLine(line: string): string[] {
   return out.map((s) => s.trim())
 }
 
+const numOrUndef = (s: string) => {
+  if (!s?.trim()) return undefined
+  const n = parseFloat(s)
+  return Number.isNaN(n) ? undefined : n
+}
+
 function parseCsv(text: string): ParsedRow[] {
   const lines = text.split(/\r?\n/).filter((l) => l.trim())
   if (lines.length === 0) return []
-  // Skip a header row if the first line looks like column names.
-  const first = parseLine(lines[0]).map((c) => c.toLowerCase())
-  const start = first.includes("title") && first.includes("sku") ? 1 : 0
+  const header = parseLine(lines[0]).map((c) => c.toLowerCase().replace(/\s+/g, "_"))
+  const hasHeader = header.includes("title") && header.includes("sku")
+  // Column index lookup: header-based if a header row is present, else fall
+  // back to the canonical COLUMNS order.
+  const idx = (name: (typeof COLUMNS)[number]) =>
+    hasHeader ? header.indexOf(name) : COLUMNS.indexOf(name)
+  const start = hasHeader ? 1 : 0
   const rows: ParsedRow[] = []
   for (let i = start; i < lines.length; i++) {
     const cols = parseLine(lines[i])
-    const line = i + 1
-    const [title = "", sku = "", priceStr = "", qtyStr = ""] = cols
-    const price = parseFloat(priceStr)
-    const qty = parseInt(qtyStr, 10)
+    const get = (name: (typeof COLUMNS)[number]) => {
+      const j = idx(name)
+      return j >= 0 ? (cols[j] ?? "") : ""
+    }
+    const title = get("title")
+    const sku = get("sku")
+    const price = parseFloat(get("price"))
+    const cost = parseFloat(get("cost"))
+    const qty = parseInt(get("qty"), 10)
+
     let error: string | undefined
-    if (cols.length < 4) error = 'Expected 4 columns: title, sku, price, qty'
-    else if (!title) error = "Missing title"
+    if (!title) error = "Missing title"
     else if (!sku) error = "Missing SKU"
-    else if (Number.isNaN(price) || price < 0) error = `Invalid price "${priceStr}"`
-    rows.push({ line, title, sku, price: Number.isNaN(price) ? 0 : price, qty: Number.isNaN(qty) ? 0 : qty, error })
+    else if (Number.isNaN(price) || price < 0) error = `Invalid price "${get("price")}"`
+    else if (!get("cost").trim() ? false : (Number.isNaN(cost) || cost < 0)) error = `Invalid cost "${get("cost")}"`
+
+    rows.push({
+      line: i + 1,
+      title, sku,
+      cost: Number.isNaN(cost) ? 0 : cost,
+      price: Number.isNaN(price) ? 0 : price,
+      qty: Number.isNaN(qty) ? 0 : qty,
+      description: get("description"),
+      brand: get("brand"),
+      category: get("category"),
+      tags: get("tags").split(";").map((t) => t.trim()).filter(Boolean),
+      variantName: get("variant_name"),
+      weightLb: numOrUndef(get("weight_lb")),
+      lengthIn: numOrUndef(get("length_in")),
+      widthIn: numOrUndef(get("width_in")),
+      heightIn: numOrUndef(get("height_in")),
+      error,
+    })
   }
   return rows
 }
@@ -69,6 +127,7 @@ function parseCsv(text: string): ParsedRow[] {
 export default function BulkProductsPage() {
   const create = useCreateFullProduct()
   const { data: locations } = useLocations()
+  const { data: categories } = useCategories()
   const fileRef = useRef<HTMLInputElement>(null)
 
   const [csv, setCsv] = useState("")
@@ -83,6 +142,11 @@ export default function BulkProductsPage() {
   const rows = useMemo(() => parseCsv(csv), [csv])
   const valid = rows.filter((r) => !r.error)
   const invalid = rows.filter((r) => r.error)
+
+  // Resolve a category name (case-insensitive) to its platform id.
+  const categoryId = (name: string): string | undefined =>
+    name ? categories?.find((c) => c.name.toLowerCase() === name.toLowerCase())?.id : undefined
+  const categoryUnmatched = (r: ParsedRow) => Boolean(r.category) && !categoryId(r.category)
 
   function ingest(file: File) {
     setFileName(file.name)
@@ -121,12 +185,27 @@ export default function BulkProductsPage() {
     const out: ImportResult[] = []
     for (const row of valid) {
       try {
+        const catId = categoryId(row.category)
         await create.mutateAsync({
           title: row.title,
+          description: row.description || undefined,
           sku: row.sku,
+          brand: row.brand || undefined,
           status: "active",
+          categoryIds: catId ? [catId] : undefined,
+          tags: row.tags,
           locationId: resolvedLocation,
-          variants: [{ sku: row.sku, priceCents: Math.round(row.price * 100), initialStock: row.qty }],
+          variants: [{
+            sku: row.sku,
+            name: row.variantName || undefined,
+            costCents: Math.round(row.cost * 100),
+            priceCents: Math.round(row.price * 100),
+            initialStock: row.qty,
+            weightKg: lbToKg(row.weightLb),
+            lengthIn: row.lengthIn,
+            widthIn: row.widthIn,
+            heightIn: row.heightIn,
+          }],
         })
         out.push({ sku: row.sku, title: row.title, ok: true })
       } catch (e) {
@@ -149,7 +228,7 @@ export default function BulkProductsPage() {
       </div>
       <PageHeader
         title="Bulk upload products"
-        subtitle="Upload a CSV to create many products at once. Each row becomes a live product with stock."
+        subtitle="Upload a CSV to create many products at once. Each row becomes a live, priced, in-stock product."
         actions={
           <Button variant="secondary" size="sm" onClick={downloadTemplate}>
             <Download className="h-4 w-4" /> Download template
@@ -157,7 +236,7 @@ export default function BulkProductsPage() {
         }
       />
 
-      <div className="max-w-4xl space-y-4">
+      <div className="max-w-5xl space-y-4">
         <Card>
           <CardBody className="space-y-4">
             <div className="max-w-xs">
@@ -169,7 +248,6 @@ export default function BulkProductsPage() {
               </Select>
             </div>
 
-            {/* Drop zone */}
             <div
               onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
               onDragLeave={() => setDragging(false)}
@@ -192,8 +270,10 @@ export default function BulkProductsPage() {
               ) : (
                 <p className="text-sm font-semibold text-foreground">Drop a CSV here, or click to browse</p>
               )}
-              <p className="text-xs text-muted-foreground">
-                Columns: <span className="font-mono">title, sku, price, qty</span> — one product per row
+              <p className="text-xs text-muted-foreground max-w-lg">
+                Required: <span className="font-mono">title, sku, price, qty</span>. Optional:{" "}
+                <span className="font-mono">cost, description, brand, category, tags, variant_name, weight_lb, length_in, width_in, height_in</span>.
+                Download the template for the exact format.
               </p>
               <input
                 ref={fileRef}
@@ -230,8 +310,10 @@ export default function BulkProductsPage() {
                     <tr className="text-left">
                       <th className="px-4 py-2 font-medium">Title</th>
                       <th className="px-4 py-2 font-medium">SKU</th>
+                      <th className="px-4 py-2 font-medium text-right">Cost</th>
                       <th className="px-4 py-2 font-medium text-right">Price</th>
                       <th className="px-4 py-2 font-medium text-right">Qty</th>
+                      <th className="px-4 py-2 font-medium">Category</th>
                       <th className="px-4 py-2 font-medium"></th>
                     </tr>
                   </thead>
@@ -240,8 +322,16 @@ export default function BulkProductsPage() {
                       <tr key={r.line} className={r.error ? "bg-red-50/50" : ""}>
                         <td className="px-4 py-2 font-medium text-foreground">{r.title || <span className="text-muted-foreground italic">—</span>}</td>
                         <td className="px-4 py-2 font-mono text-xs text-muted-foreground">{r.sku || "—"}</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{r.cost ? `$${r.cost.toFixed(2)}` : "—"}</td>
                         <td className="px-4 py-2 text-right tabular-nums">${r.price.toFixed(2)}</td>
                         <td className="px-4 py-2 text-right tabular-nums">{r.qty}</td>
+                        <td className="px-4 py-2 text-xs">
+                          {r.category
+                            ? categoryUnmatched(r)
+                              ? <span className="inline-flex items-center gap-1 text-amber-600" title="No matching platform category — product will be created without one"><AlertTriangle className="h-3 w-3" /> {r.category}</span>
+                              : <span className="text-muted-foreground">{r.category}</span>
+                            : <span className="text-muted-foreground">—</span>}
+                        </td>
                         <td className="px-4 py-2">
                           {r.error
                             ? <span className="inline-flex items-center gap-1 text-xs text-red-600"><AlertTriangle className="h-3.5 w-3.5" /> {r.error}</span>
