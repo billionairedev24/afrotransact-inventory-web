@@ -12,7 +12,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   // attributes onto <html>/<body> before React hydrates, which otherwise
   // trips a hydration mismatch warning.
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" style={{ colorScheme: "light" }} suppressHydrationWarning>
       <body className="min-h-screen" suppressHydrationWarning>
         <Providers>{children}</Providers>
       </body>

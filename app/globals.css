@@ -41,8 +41,17 @@
     --brand-green-foreground: 0 0% 98%;
   }
 
+  /* The inventory portal is a single light theme — never adopt the OS dark
+     mode. Declaring color-scheme: light keeps native controls (inputs, selects,
+     dialogs, scrollbars, autofill) light at night instead of the browser
+     painting them dark over our light design. */
+  html {
+    color-scheme: light;
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
+    color-scheme: light;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }

@@ -16,12 +16,12 @@ import { MediaPicker } from "@/components/media/MediaPicker"
 const MAX_IMAGES = 6
 
 type VariantRow = {
-  name: string; sku: string; price: string; qty: string
+  name: string; sku: string; cost: string; price: string; qty: string
   weight: string; length: string; width: string; height: string
 }
 
 const emptyVariant = (): VariantRow => ({
-  name: "", sku: "", price: "", qty: "", weight: "", length: "", width: "", height: "",
+  name: "", sku: "", cost: "", price: "", qty: "", weight: "", length: "", width: "", height: "",
 })
 
 const num = (s: string): number | undefined => {
@@ -100,6 +100,7 @@ export default function NewProductPage() {
         sku: v.sku.trim(),
         name: v.name.trim() || undefined,
         priceCents: Math.round(parseFloat(v.price || "0") * 100),
+        costCents: Math.round(parseFloat(v.cost || "0") * 100),
         initialStock: parseInt(v.qty || "0", 10) || 0,
         weightKg: lbToKg(num(v.weight)),
         lengthIn: num(v.length),
@@ -228,7 +229,7 @@ export default function NewProductPage() {
                         </button>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
                       <div>
                         <FieldLabel htmlFor={`vn${i}`}>Name</FieldLabel>
                         <Input id={`vn${i}`} value={v.name} onChange={(e) => setVariant(i, { name: e.target.value })} placeholder="5kg bag" />
@@ -238,8 +239,12 @@ export default function NewProductPage() {
                         <Input id={`vs${i}`} value={v.sku} onChange={(e) => setVariant(i, { sku: e.target.value })} placeholder="RICE-5KG" className="font-mono text-xs" />
                       </div>
                       <div>
-                        <FieldLabel htmlFor={`vp${i}`}>Price ($)</FieldLabel>
-                        <Input id={`vp${i}`} type="number" min="0" step="0.01" value={v.price} onChange={(e) => setVariant(i, { price: e.target.value })} placeholder="19.99" />
+                        <FieldLabel htmlFor={`vc${i}`}>Unit cost ($)</FieldLabel>
+                        <Input id={`vc${i}`} type="number" min="0" step="0.01" value={v.cost} onChange={(e) => setVariant(i, { cost: e.target.value })} placeholder="What you paid" title="What AfroTransact paid per unit — drives COGS + margin. Internal only." />
+                      </div>
+                      <div>
+                        <FieldLabel htmlFor={`vp${i}`}>Sell price ($)</FieldLabel>
+                        <Input id={`vp${i}`} type="number" min="0" step="0.01" value={v.price} onChange={(e) => setVariant(i, { price: e.target.value })} placeholder="19.99" title="What the buyer pays." />
                       </div>
                       <div>
                         <FieldLabel htmlFor={`vq${i}`}>Qty in stock</FieldLabel>
