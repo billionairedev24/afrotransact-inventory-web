@@ -825,7 +825,13 @@ export interface DashboardSnapshot {
 
 export function useDashboard(): DashboardSnapshot {
   // 7-day window so the sparkline has data even on a quiet afternoon.
-  const since = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()
+  // Rounded to the UTC day so this value is STABLE across renders. A raw
+  // Date.now() here changed the string every render (ms precision), which made
+  // the react-query key below change every render → infinite refetch → a
+  // request storm that exhausted the browser's connections (ERR_INSUFFICIENT_
+  // RESOURCES) and took down the session fetch.
+  const DAY_MS = 86_400_000
+  const since = new Date(Math.floor(Date.now() / DAY_MS) * DAY_MS - 7 * DAY_MS).toISOString()
   const results = useQueries({
     queries: [
       { queryKey: keys.products(),                              queryFn: api.listProducts,                                                   staleTime: 60_000 },
