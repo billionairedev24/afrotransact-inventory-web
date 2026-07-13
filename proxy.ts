@@ -34,6 +34,16 @@ function isPublic(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"))
 }
 
+// next-auth session cookie names: `__Secure-` prefixed over https, plain over
+// http; a chunked (>4 KB) session adds a `.0` suffix. Presence of ANY of these
+// means the user has a session — a check that needs no secret and no decode.
+const SESSION_COOKIE_NAMES = [
+  "__Secure-next-auth.session-token",
+  "__Secure-next-auth.session-token.0",
+  "next-auth.session-token",
+  "next-auth.session-token.0",
+]
+
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
 
@@ -42,24 +52,36 @@ export async function proxy(req: NextRequest) {
   const authEnabled = Boolean(process.env.KEYCLOAK_ISSUER && process.env.KEYCLOAK_CLIENT_ID)
   if (!authEnabled) return NextResponse.next()
 
-  // In Next.js 16 the proxy runs on the Node.js runtime (not Edge), so
-  // getToken() has full access to runtime env vars — including Sensitive ones —
-  // and full crypto, and can authoritatively decode the session right here.
-  //
-  // secureCookie is pinned to the request scheme instead of getToken's default
-  // NEXTAUTH_URL/VERCEL sniffing, so it always looks for the correct cookie
-  // name (`__Secure-` prefixed over https). AUTH_SECRET resolves the signing
-  // secret from any accepted env-var spelling (see lib/secret.ts).
-  const secureCookie =
-    req.nextUrl.protocol === "https:" ||
-    req.headers.get("x-forwarded-proto") === "https"
-  const token = await getToken({ req, secret: AUTH_SECRET, secureCookie })
-
-  if (!token) {
+  // OPTIMISTIC gate (the pattern Next.js's docs recommend for proxy): redirect
+  // to sign-in only when there's NO session cookie — a check that needs no
+  // secret and no decode. We deliberately do NOT hard-depend on getToken() here:
+  // in production this proxy returns null for a VALID session (the same cookie
+  // decodes fine in Node via /api/auth/session), so blocking on it loops
+  // forever. The AUTHORITATIVE check (decode + role/permission) happens in Node
+  // — the app session and the backend API, which validates the same Keycloak
+  // token and enforces inventory:access. (Same split the storefront uses.)
+  const hasSession = SESSION_COOKIE_NAMES.some((name) => req.cookies.has(name))
+  if (!hasSession) {
     const url = req.nextUrl.clone()
     url.pathname = "/auth/signin"
     url.searchParams.set("callbackUrl", pathname)
     return NextResponse.redirect(url)
+  }
+
+  // Best-effort authz + diagnostics. When the proxy CAN decode (e.g. local dev),
+  // enforce role/permission and bounce to /unauthorized. When it can't, log why
+  // (so we can see whether the secret or the cookie name is the culprit) and
+  // fall through — Node + the backend remain the source of truth.
+  const secureCookie =
+    req.nextUrl.protocol === "https:" ||
+    req.headers.get("x-forwarded-proto") === "https"
+  const token = await getToken({ req, secret: AUTH_SECRET, secureCookie })
+  if (!token) {
+    console.warn(
+      `[auth] proxy could not decode session; deferring to Node/backend. ` +
+        `path=${pathname} secretPresent=${Boolean(AUTH_SECRET)} secureCookie=${secureCookie}`,
+    )
+    return NextResponse.next()
   }
 
   // Decode roles + permissions LIVE from the raw KC access token instead
