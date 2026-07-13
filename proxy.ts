@@ -41,7 +41,18 @@ export async function proxy(req: NextRequest) {
   const authEnabled = Boolean(process.env.KEYCLOAK_ISSUER && process.env.KEYCLOAK_CLIENT_ID)
   if (!authEnabled) return NextResponse.next()
 
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET })
+  // getToken()'s default `secureCookie` detection reads process.env.NEXTAUTH_URL
+  // / VERCEL — but those live in next-auth's own bundle and aren't reliably
+  // present in the Edge (proxy) runtime. When it guesses wrong it looks for the
+  // non-prefixed `next-auth.session-token` while the real prod cookie is
+  // `__Secure-next-auth.session-token`, finds nothing, and returns null —
+  // bouncing an authenticated user to /auth/signin forever. Derive it from the
+  // actual request instead (prod/preview are always https; only local http dev
+  // uses the non-secure cookie, and there auth is usually disabled anyway).
+  const secureCookie =
+    req.nextUrl.protocol === "https:" ||
+    req.headers.get("x-forwarded-proto") === "https"
+  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET, secureCookie })
 
   if (!token) {
     const url = req.nextUrl.clone()
