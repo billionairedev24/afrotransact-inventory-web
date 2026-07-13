@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { getToken } from "next-auth/jwt"
+import { AUTH_SECRET } from "@/lib/secret"
 
 // Inventory is an admin-only app. To get in you need:
 //   - a valid Keycloak session (auth gate)
@@ -52,7 +53,7 @@ export async function proxy(req: NextRequest) {
   const secureCookie =
     req.nextUrl.protocol === "https:" ||
     req.headers.get("x-forwarded-proto") === "https"
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET, secureCookie })
+  const token = await getToken({ req, secret: AUTH_SECRET, secureCookie })
 
   if (!token) {
     const url = req.nextUrl.clone()

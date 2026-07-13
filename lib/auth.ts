@@ -1,5 +1,6 @@
 import KeycloakProvider from "next-auth/providers/keycloak"
 import type { AuthOptions } from "next-auth"
+import { AUTH_SECRET } from "./secret"
 
 /**
  * NextAuth configuration. Keycloak in production (via env), passthrough in
@@ -20,6 +21,16 @@ const clientId = process.env.KEYCLOAK_CLIENT_ID
 const clientSecret = process.env.KEYCLOAK_CLIENT_SECRET
 
 export const authEnabled = Boolean(issuer && clientId)
+
+// Fail loud instead of looping silently: if auth is on but no secret resolved
+// under ANY accepted name, the session cookie can't be sealed/read and every
+// request bounces to sign-in. Surface it in the logs at startup.
+if (authEnabled && !AUTH_SECRET) {
+  console.error(
+    "[auth] No session secret found. Set NEXTAUTH_SECRET (canonical) in the " +
+      "environment — auth cannot sign/verify session cookies without it.",
+  )
+}
 
 // Authorisation rule for the inventory app:
 //   - realm role `admin`           — identity (who you are)
@@ -95,6 +106,9 @@ export const authOptions: AuthOptions = {
         }),
       ]
     : [],
+  // Set explicitly (not left to NextAuth's NEXTAUTH_SECRET auto-pickup) so a
+  // differently-spelled env var name can't leave the app secret-less.
+  secret: AUTH_SECRET,
   session: { strategy: "jwt" },
   callbacks: {
     async jwt({ token, account }) {
