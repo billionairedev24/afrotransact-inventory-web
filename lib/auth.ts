@@ -106,7 +106,13 @@ export const authOptions: AuthOptions = {
         const { roles, permissions } = decodeClaims(account.access_token)
         token.roles = roles
         token.permissions = permissions
-        if (account.id_token) token.idToken = account.id_token
+        // Deliberately do NOT persist id_token. access + refresh already push
+        // the encrypted NextAuth cookie close to the 4 KB single-cookie limit;
+        // adding id_token tips it over, so Next chunks it into
+        // __Secure-next-auth.session-token.0/.1 — and the Edge proxy's
+        // getToken() then fails to reassemble it, bouncing an authenticated
+        // user to /auth/signin in an infinite loop. (Same fix the storefront
+        // already shipped.) Signout still works via client_id — see lib/signout.ts.
         return token
       }
 
@@ -149,7 +155,7 @@ export const authOptions: AuthOptions = {
             }
             token.accessToken = j.access_token
             if (j.refresh_token) token.refreshToken = j.refresh_token
-            if (j.id_token) token.idToken = j.id_token
+            // id_token intentionally not persisted — see the sign-in branch above.
             token.expiresAt = nowSec + (j.expires_in ?? 300)
             const { roles, permissions } = decodeClaims(j.access_token)
             token.roles = roles
@@ -163,9 +169,8 @@ export const authOptions: AuthOptions = {
       return token
     },
     async session({ session, token }) {
-      const s = session as { accessToken?: string; idToken?: string; roles?: string[]; permissions?: string[] }
+      const s = session as { accessToken?: string; roles?: string[]; permissions?: string[] }
       s.accessToken = token.accessToken as string | undefined
-      s.idToken = token.idToken as string | undefined
       s.roles = (token.roles as string[] | undefined) ?? []
       s.permissions = (token.permissions as string[] | undefined) ?? []
       return session
