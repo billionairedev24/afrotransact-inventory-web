@@ -9,22 +9,38 @@ import { AppShell, PageHeader } from "@/components/layout/AppShell"
 import { Card, CardBody, CardHeader } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
 import { FieldLabel, Select } from "@/components/ui/Input"
-import { useCreateFullProduct, useLocations, useCategories } from "@/lib/queries"
+import { useCreateFullProduct, useLocations, useCategories, useMedia } from "@/lib/queries"
 
 // One product (single variant) per row. Header-based so columns can be in any
 // order; unknown columns are ignored. cost/price are in dollars, weight in lb,
 // dimensions in inches, tags are semicolon-separated (commas are the delimiter).
+//
+// IMAGES BY NAME
+// --------------
+// The `images` column lets you attach product photos in bulk WITHOUT pasting
+// long URLs. Steps for the operator:
+//   1. Go to Media (or a product's Images card) and upload the photos first,
+//      OR click "Sync from UploadThing" so the media library knows about them.
+//   2. In the spreadsheet's `images` column, put the image's NAME exactly as it
+//      appears in the media library — the file name, e.g. `rice-5kg.png`.
+//      Multiple images? Separate them with semicolons: `rice-front.png;rice-back.png`.
+//      The first name becomes the primary image (sort order 0).
+// Matching is case-insensitive and also works with or without the file
+// extension (`rice-5kg` matches `rice-5kg.png`). Names that don't match any
+// uploaded media are flagged in the preview and simply skipped — the product is
+// still created, just without that picture. Leave the column blank for none.
 const COLUMNS = [
   "title", "sku", "cost", "price", "qty",
-  "description", "brand", "category", "tags", "variant_name",
+  "description", "brand", "category", "tags", "images", "variant_name",
   "weight_lb", "length_in", "width_in", "height_in",
 ] as const
 
 const TEMPLATE = [
-  "title,sku,cost,price,qty,description,brand,category,tags,variant_name,weight_lb,length_in,width_in,height_in",
-  'Premium Nigerian Rice,RICE-5KG,12.00,19.99,100,"Long-grain parboiled rice, stone-free.",Mama Gold,Food & Grocery,rice;staple;party-size,5kg bag,11,16,11,5',
-  "Jollof Spice Mix,SPICE-JLF,3.10,6.50,250,Ready-blend jollof seasoning.,AfroTaste,Food & Grocery,spice;jollof,100g pouch,0.25,5,4,1",
-  "Palm Oil 1L,OIL-PALM-1L,4.20,8.00,60,Pure red palm oil.,,Food & Grocery,oil;cooking,1L bottle,2.4,4,4,10",
+  "title,sku,cost,price,qty,description,brand,category,tags,images,variant_name,weight_lb,length_in,width_in,height_in",
+  // images: names of already-uploaded media, semicolons for multiple, first = primary. Blank = no image.
+  'Premium Nigerian Rice,RICE-5KG,12.00,19.99,100,"Long-grain parboiled rice, stone-free.",Mama Gold,Food & Grocery,rice;staple;party-size,rice-5kg-front.png;rice-5kg-back.png,5kg bag,11,16,11,5',
+  "Jollof Spice Mix,SPICE-JLF,3.10,6.50,250,Ready-blend jollof seasoning.,AfroTaste,Food & Grocery,spice;jollof,jollof-spice.png,100g pouch,0.25,5,4,1",
+  "Palm Oil 1L,OIL-PALM-1L,4.20,8.00,60,Pure red palm oil.,,Food & Grocery,oil;cooking,,1L bottle,2.4,4,4,10",
 ].join("\n")
 
 const LBS_TO_KG = 0.45359237
@@ -42,6 +58,7 @@ type ParsedRow = {
   brand: string
   category: string
   tags: string[]
+  imageNames: string[]
   variantName: string
   weightLb?: number
   lengthIn?: number
@@ -113,6 +130,7 @@ function parseCsv(text: string): ParsedRow[] {
       brand: get("brand"),
       category: get("category"),
       tags: get("tags").split(";").map((t) => t.trim()).filter(Boolean),
+      imageNames: get("images").split(";").map((s) => s.trim()).filter(Boolean),
       variantName: get("variant_name"),
       weightLb: numOrUndef(get("weight_lb")),
       lengthIn: numOrUndef(get("length_in")),
@@ -128,6 +146,7 @@ export default function BulkProductsPage() {
   const create = useCreateFullProduct()
   const { data: locations } = useLocations()
   const { data: categories } = useCategories()
+  const { data: media } = useMedia()
   const fileRef = useRef<HTMLInputElement>(null)
 
   const [csv, setCsv] = useState("")
@@ -147,6 +166,35 @@ export default function BulkProductsPage() {
   const categoryId = (name: string): string | undefined =>
     name ? categories?.find((c) => c.name.toLowerCase() === name.toLowerCase())?.id : undefined
   const categoryUnmatched = (r: ParsedRow) => Boolean(r.category) && !categoryId(r.category)
+
+  // Media library lookup: image name (and name-without-extension) → URL, so the
+  // `images` column can reference photos by file name instead of a URL.
+  // Case-insensitive; `rice-5kg` matches `rice-5kg.png`.
+  const stripExt = (s: string) => s.replace(/\.[a-z0-9]+$/i, "")
+  const mediaByName = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const m of media ?? []) {
+      const n = (m.name ?? "").trim().toLowerCase()
+      if (!n) continue
+      if (!map.has(n)) map.set(n, m.url)
+      const noExt = stripExt(n)
+      if (noExt && !map.has(noExt)) map.set(noExt, m.url)
+    }
+    return map
+  }, [media])
+
+  // Resolve a row's image names → matched URLs (first = primary) + unmatched names.
+  const resolveImages = (names: string[]): { urls: string[]; unmatched: string[] } => {
+    const urls: string[] = []
+    const unmatched: string[] = []
+    for (const raw of names) {
+      const key = raw.trim().toLowerCase()
+      const url = mediaByName.get(key) ?? mediaByName.get(stripExt(key))
+      if (url) urls.push(url)
+      else unmatched.push(raw)
+    }
+    return { urls, unmatched }
+  }
 
   function ingest(file: File) {
     setFileName(file.name)
@@ -186,6 +234,7 @@ export default function BulkProductsPage() {
     for (const row of valid) {
       try {
         const catId = categoryId(row.category)
+        const imageUrls = resolveImages(row.imageNames).urls
         await create.mutateAsync({
           title: row.title,
           description: row.description || undefined,
@@ -194,6 +243,7 @@ export default function BulkProductsPage() {
           status: "active",
           categoryIds: catId ? [catId] : undefined,
           tags: row.tags,
+          imageUrls: imageUrls.length > 0 ? imageUrls : undefined,
           locationId: resolvedLocation,
           variants: [{
             sku: row.sku,
@@ -272,8 +322,16 @@ export default function BulkProductsPage() {
               )}
               <p className="text-xs text-muted-foreground max-w-lg">
                 Required: <span className="font-mono">title, sku, price, qty</span>. Optional:{" "}
-                <span className="font-mono">cost, description, brand, category, tags, variant_name, weight_lb, length_in, width_in, height_in</span>.
+                <span className="font-mono">cost, description, brand, category, tags, images, variant_name, weight_lb, length_in, width_in, height_in</span>.
                 Download the template for the exact format.
+              </p>
+              <p className="text-xs text-muted-foreground max-w-lg">
+                <span className="font-semibold text-foreground">Adding photos:</span> upload images to the media
+                library first (or click <span className="font-medium">Sync from UploadThing</span>), then put each
+                image&rsquo;s file name in the <span className="font-mono">images</span> column — e.g.{" "}
+                <span className="font-mono">rice-front.png;rice-back.png</span> (semicolons for multiple, first is the
+                primary). Matching ignores case and the file extension. Unmatched names are flagged below and skipped.
+                {media ? <> {media.length} image{media.length === 1 ? "" : "s"} available in your media library.</> : null}
               </p>
               <input
                 ref={fileRef}
@@ -314,6 +372,7 @@ export default function BulkProductsPage() {
                       <th className="px-4 py-2 font-medium text-right">Price</th>
                       <th className="px-4 py-2 font-medium text-right">Qty</th>
                       <th className="px-4 py-2 font-medium">Category</th>
+                      <th className="px-4 py-2 font-medium">Images</th>
                       <th className="px-4 py-2 font-medium"></th>
                     </tr>
                   </thead>
@@ -331,6 +390,26 @@ export default function BulkProductsPage() {
                               ? <span className="inline-flex items-center gap-1 text-amber-600" title="No matching platform category — product will be created without one"><AlertTriangle className="h-3 w-3" /> {r.category}</span>
                               : <span className="text-muted-foreground">{r.category}</span>
                             : <span className="text-muted-foreground">—</span>}
+                        </td>
+                        <td className="px-4 py-2 text-xs">
+                          {r.imageNames.length === 0
+                            ? <span className="text-muted-foreground">—</span>
+                            : (() => {
+                                const { urls, unmatched } = resolveImages(r.imageNames)
+                                return (
+                                  <span className="inline-flex items-center gap-2">
+                                    {urls.length > 0 && <span className="text-green-600">{urls.length} matched</span>}
+                                    {unmatched.length > 0 && (
+                                      <span
+                                        className="inline-flex items-center gap-1 text-amber-600"
+                                        title={`No media named: ${unmatched.join(", ")} — these will be skipped`}
+                                      >
+                                        <AlertTriangle className="h-3 w-3" /> {unmatched.length} missing
+                                      </span>
+                                    )}
+                                  </span>
+                                )
+                              })()}
                         </td>
                         <td className="px-4 py-2">
                           {r.error
