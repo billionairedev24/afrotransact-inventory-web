@@ -33,7 +33,7 @@ export function MovementsAreaChart({
   return (
     <div style={{ width: "100%", height }}>
       <ResponsiveContainer>
-        <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+        <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
           <defs>
             <linearGradient id="grad-in" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%"  stopColor="#10b981" stopOpacity={0.45} />
@@ -70,7 +70,7 @@ export function ValuationByLocationChart({
     <div style={{ width: "100%", height }}>
       <ResponsiveContainer>
         <PieChart>
-          <Pie data={data} dataKey="value" nameKey="name" innerRadius={45} outerRadius={90} paddingAngle={1}>
+          <Pie data={data} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="85%" paddingAngle={1}>
             {data.map((_, i) => (
               <Cell key={i} fill={COLORS[i % COLORS.length]} />
             ))}
@@ -95,9 +95,19 @@ export function MovementsByReasonChart({
   return (
     <div style={{ width: "100%", height }}>
       <ResponsiveContainer>
-        <BarChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+        <BarChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" vertical={false} />
-          <XAxis dataKey="reason" tick={{ fontSize: 11, fill: "#737373" }} axisLine={false} tickLine={false} />
+          <XAxis
+            dataKey="reason"
+            tick={{ fontSize: 11, fill: "#737373" }}
+            axisLine={false}
+            tickLine={false}
+            interval={0}
+            angle={-30}
+            textAnchor="end"
+            height={56}
+            tickMargin={8}
+          />
           <YAxis tick={{ fontSize: 11, fill: "#737373" }} axisLine={false} tickLine={false} width={36} allowDecimals={false} />
           <Tooltip
             cursor={{ fill: "#f5f5f5" }}
