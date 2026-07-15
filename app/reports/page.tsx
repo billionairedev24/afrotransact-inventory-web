@@ -101,7 +101,7 @@ function ValuationTab() {
           {summary.pie.length === 0 ? (
             <p className="text-sm text-muted-foreground">No stock to value yet.</p>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr] gap-6 items-center">
+            <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-6 items-center">
               <ValuationByLocationChart data={summary.pie} />
               <ul className="space-y-1.5 text-sm">
                 {summary.pie
@@ -215,7 +215,7 @@ function MovementsTab() {
         </CardBody>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-6">
         <Card>
           <CardHeader>
             <h2 className="text-sm font-semibold text-foreground">Volume by day</h2>
