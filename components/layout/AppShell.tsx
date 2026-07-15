@@ -11,13 +11,15 @@ import {
   LayoutDashboard,
   ImageIcon,
   LogOut,
+  Menu,
   RotateCcw,
   Send,
   Truck,
   Warehouse,
+  X,
   type LucideIcon,
 } from "lucide-react"
-import type { ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react"
 import { cn } from "@/lib/cn"
 import { useGlobalScannerHotkey } from "@/hooks/useScannerFocus"
 import { useIsFetching, useIsMutating } from "@tanstack/react-query"
@@ -53,91 +55,99 @@ export function AppShell({ children }: { children: ReactNode }) {
   // on the current page. No-op on pages with no scanner.
   useGlobalScannerHotkey()
 
+  // Mobile navigation drawer. Below `lg` the sidebar collapses behind a
+  // hamburger; the same nav content is reused so phones get icons + the
+  // sign-out control (previously unreachable on mobile).
+  const [menuOpen, setMenuOpen] = useState(false)
+  const closeRef = useRef<HTMLButtonElement>(null)
+
+  // Close the drawer whenever the route changes (tapping a link navigates).
+  useEffect(() => {
+    setMenuOpen(false)
+  }, [pathname])
+
+  // While open: lock body scroll, close on Escape, move focus into the panel.
+  useEffect(() => {
+    if (!menuOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false)
+    }
+    document.addEventListener("keydown", onKey)
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    closeRef.current?.focus()
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      document.body.style.overflow = prevOverflow
+    }
+  }, [menuOpen])
+
   return (
     <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] bg-muted/30">
+      {/* Desktop sidebar */}
       <aside className="hidden lg:flex flex-col border-r border-border bg-card">
-        <Link href="/" className="flex h-16 items-center gap-2.5 border-b border-border px-6">
-          {/* Brand Deck primary horizontal lockup (yellow bag + black wordmark). */}
-          <img src="/brand-logo-2/Logos/Black_Yellow.svg" alt="AfroTransact" className="h-6 w-auto shrink-0" />
-          <span className="rounded-md bg-brand-gold/20 px-1.5 py-0.5 text-[11px] font-semibold text-foreground">
-            Inventory
-          </span>
-        </Link>
-
-        <nav className="flex-1 p-3 space-y-0.5">
-          {NAV.map((item) => {
-            const Icon = item.icon
-            const active =
-              item.href === "/"
-                ? pathname === "/"
-                : pathname === item.href || pathname.startsWith(item.href + "/")
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors",
-                  active
-                    ? "bg-brand-gold/15 text-foreground font-semibold"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                )}
-              >
-                <Icon className={cn("h-4 w-4", active && "text-foreground")} />
-                {item.label}
-              </Link>
-            )
-          })}
-        </nav>
-
-        <div className="border-t border-border p-3">
-          {user ? (
-            <div className="rounded-xl bg-muted/40 p-3">
-              <p className="truncate text-xs font-semibold text-foreground">{user.name ?? user.email}</p>
-              <p className="truncate text-[11px] text-muted-foreground">{user.email}</p>
-              <button
-                type="button"
-                onClick={() => void signOutFromKeycloak(idToken)}
-                className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
-              >
-                <LogOut className="h-3.5 w-3.5" /> Sign out
-              </button>
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">Dev mode (no auth)</p>
-          )}
-        </div>
+        <SidebarNav pathname={pathname} user={user} idToken={idToken} />
       </aside>
 
       <InflightBar />
 
-      {/* Mobile top bar */}
-      <header className="lg:hidden border-b border-border bg-card px-4 py-3 flex items-center gap-2">
-        <img src="/brand-logo-2/Logos/Black_Yellow.svg" alt="AfroTransact" className="h-5 w-auto shrink-0" />
-        <span className="rounded-md bg-brand-gold/20 px-1.5 py-0.5 text-[10px] font-semibold text-foreground">Inv</span>
-        <nav className="ml-auto flex items-center gap-1 overflow-x-auto">
-          {NAV.map((item) => {
-            const active =
-              item.href === "/"
-                ? pathname === "/"
-                : pathname.startsWith(item.href)
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "rounded-lg px-2.5 py-1.5 text-xs font-semibold",
-                  active ? "bg-brand-gold/15 text-foreground" : "text-muted-foreground",
-                )}
-              >
-                {item.label}
-              </Link>
-            )
-          })}
-        </nav>
-        <NotificationsBell />
+      {/* Mobile top bar: hamburger + brand + notifications. */}
+      <header className="lg:hidden sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-card/95 px-4 backdrop-blur">
+        <button
+          type="button"
+          onClick={() => setMenuOpen(true)}
+          aria-label="Open navigation menu"
+          aria-expanded={menuOpen}
+          aria-controls="mobile-nav"
+          className="-ml-1.5 rounded-lg p-2 text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-gold"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <Link href="/" className="flex items-center gap-2">
+          <img src="/brand/logo.svg" alt="AfroTransact" className="h-6 w-auto shrink-0" />
+          <span className="rounded-md bg-brand-gold/20 px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
+            Inventory
+          </span>
+        </Link>
+        <div className="ml-auto">
+          <NotificationsBell />
+        </div>
       </header>
 
-      <main className="min-w-0">
+      {/* Mobile drawer backdrop */}
+      <div
+        aria-hidden
+        onClick={() => setMenuOpen(false)}
+        className={cn(
+          "fixed inset-0 z-40 bg-brand-dark/50 lg:hidden transition-opacity duration-200 motion-reduce:transition-none",
+          menuOpen ? "opacity-100" : "pointer-events-none opacity-0",
+        )}
+      />
+
+      {/* Mobile drawer panel — off-canvas, slides in from the left. */}
+      <aside
+        id="mobile-nav"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Navigation"
+        inert={!menuOpen}
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex w-[280px] max-w-[85vw] flex-col border-r border-border bg-card shadow-xl lg:hidden",
+          "transition-transform duration-200 ease-out motion-reduce:transition-none",
+          menuOpen ? "translate-x-0" : "-translate-x-full",
+        )}
+      >
+        <SidebarNav
+          pathname={pathname}
+          user={user}
+          idToken={idToken}
+          onNavigate={() => setMenuOpen(false)}
+          onClose={() => setMenuOpen(false)}
+          closeRef={closeRef}
+        />
+      </aside>
+
+      <main className="min-w-0 overflow-x-clip">
         {/* Desktop top utility bar — lives INSIDE the main column so it
             doesn't interfere with the 2-column grid auto-flow. Sticky
             so the bell + future user menu stay reachable on long pages. */}
@@ -149,6 +159,99 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </main>
     </div>
+  )
+}
+
+/**
+ * Shared sidebar contents: brand lockup, primary nav, and the user /
+ * sign-out block. Rendered both in the fixed desktop sidebar and inside
+ * the mobile drawer so the two stay in lockstep. `onNavigate` lets the
+ * mobile drawer close itself when a link is tapped; `onClose`/`closeRef`
+ * wire up the drawer's close button (desktop passes neither).
+ */
+function SidebarNav({
+  pathname,
+  user,
+  idToken,
+  onNavigate,
+  onClose,
+  closeRef,
+}: {
+  pathname: string
+  user?: { name?: string | null; email?: string | null } | null
+  idToken?: string
+  onNavigate?: () => void
+  onClose?: () => void
+  closeRef?: RefObject<HTMLButtonElement | null>
+}) {
+  return (
+    <>
+      <div className="flex h-14 lg:h-16 items-center gap-2.5 border-b border-border px-4 lg:px-6">
+        <Link href="/" onClick={onNavigate} className="flex min-w-0 items-center gap-2.5">
+          {/* Brand primary horizontal lockup (yellow bag + black wordmark). */}
+          <img src="/brand/logo.svg" alt="AfroTransact" className="h-6 w-auto shrink-0" />
+          <span className="rounded-md bg-brand-gold/20 px-1.5 py-0.5 text-[11px] font-semibold text-foreground">
+            Inventory
+          </span>
+        </Link>
+        {onClose && (
+          <button
+            ref={closeRef}
+            type="button"
+            onClick={onClose}
+            aria-label="Close navigation menu"
+            className="ml-auto rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-gold lg:hidden"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        )}
+      </div>
+
+      <nav className="flex-1 overflow-y-auto p-3 space-y-0.5">
+        {NAV.map((item) => {
+          const Icon = item.icon
+          const active =
+            item.href === "/"
+              ? pathname === "/"
+              : pathname === item.href || pathname.startsWith(item.href + "/")
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={onNavigate}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-gold",
+                active
+                  ? "bg-brand-gold/15 text-foreground font-semibold"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              <Icon className={cn("h-4 w-4 shrink-0", active && "text-foreground")} />
+              {item.label}
+            </Link>
+          )
+        })}
+      </nav>
+
+      <div className="border-t border-border p-3">
+        {user ? (
+          <div className="rounded-xl bg-muted/40 p-3">
+            <p className="truncate text-xs font-semibold text-foreground">{user.name ?? user.email}</p>
+            <p className="truncate text-[11px] text-muted-foreground">{user.email}</p>
+            <button
+              type="button"
+              onClick={() => void signOutFromKeycloak(idToken)}
+              className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-gold rounded"
+            >
+              <LogOut className="h-3.5 w-3.5" /> Sign out
+            </button>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">Dev mode (no auth)</p>
+        )}
+      </div>
+    </>
   )
 }
 

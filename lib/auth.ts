@@ -96,6 +96,26 @@ function decodeClaims(accessToken: string | undefined): DecodedClaims {
   }
 }
 
+// Cross-subdomain SSO: the admin app (www.afrotransact.com) and this app
+// (www.inventory.afrotransact.com) share the same Keycloak client and the
+// same NEXTAUTH_SECRET, so a session cookie scoped to `.afrotransact.com`
+// lets a user cross from one to the other WITHOUT a second login. Both apps
+// must use the IDENTICAL cookie name + domain for this to work.
+//
+// Domain is only applied on real afrotransact.com hosts — on localhost a
+// `.afrotransact.com` cookie would be silently rejected, breaking dev auth.
+const useSecureCookies = (process.env.NEXTAUTH_URL ?? "").startsWith("https://")
+function sessionCookieDomain(): string | undefined {
+  try {
+    const host = new URL(process.env.NEXTAUTH_URL ?? "").hostname
+    return host === "afrotransact.com" || host.endsWith(".afrotransact.com")
+      ? ".afrotransact.com"
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export const authOptions: AuthOptions = {
   providers: authEnabled
     ? [
@@ -110,6 +130,18 @@ export const authOptions: AuthOptions = {
   // differently-spelled env var name can't leave the app secret-less.
   secret: AUTH_SECRET,
   session: { strategy: "jwt" },
+  cookies: {
+    sessionToken: {
+      name: `${useSecureCookies ? "__Secure-" : ""}next-auth.session-token`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: useSecureCookies,
+        domain: sessionCookieDomain(),
+      },
+    },
+  },
   callbacks: {
     async jwt({ token, account }) {
       // Initial sign-in: capture everything Keycloak returned.
