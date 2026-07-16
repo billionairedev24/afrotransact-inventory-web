@@ -94,6 +94,27 @@ export default function NewProductPage() {
       alert("No warehouse location found. Create one before adding stock.")
       return
     }
+    // Required-field hardening: a product must have a category, and every
+    // variant must have a price > 0 and a stock quantity (>= 0). These were
+    // previously optional, which let category-less / price-less products in.
+    if (!categoryId) {
+      alert("Select a category before saving.")
+      return
+    }
+    const filledVariants = variants.filter((v) => v.sku.trim())
+    for (const v of filledVariants) {
+      const label = v.sku.trim()
+      if (!(parseFloat(v.price) > 0)) {
+        alert(`Variant "${label}" needs a price greater than 0.`)
+        return
+      }
+      const qtyRaw = v.qty.trim()
+      const qtyNum = parseInt(qtyRaw, 10)
+      if (qtyRaw === "" || Number.isNaN(qtyNum) || qtyNum < 0) {
+        alert(`Variant "${label}" needs a stock quantity (0 or more).`)
+        return
+      }
+    }
     const parsed: NewVariantInput[] = variants
       .filter((v) => v.sku.trim())
       .map((v) => ({

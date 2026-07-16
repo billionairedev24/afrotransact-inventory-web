@@ -117,7 +117,9 @@ function parseCsv(text: string): ParsedRow[] {
     let error: string | undefined
     if (!title) error = "Missing title"
     else if (!sku) error = "Missing SKU"
-    else if (Number.isNaN(price) || price < 0) error = `Invalid price "${get("price")}"`
+    else if (!get("category").trim()) error = "Missing category"
+    else if (Number.isNaN(price) || price <= 0) error = `Price must be greater than 0 (got "${get("price")}")`
+    else if (get("qty").trim() === "" || Number.isNaN(qty) || qty < 0) error = `Missing/invalid quantity "${get("qty")}"`
     else if (!get("cost").trim() ? false : (Number.isNaN(cost) || cost < 0)) error = `Invalid cost "${get("cost")}"`
 
     rows.push({
@@ -159,13 +161,20 @@ export default function BulkProductsPage() {
 
   const resolvedLocation = locationId || locations?.[0]?.id || ""
   const rows = useMemo(() => parseCsv(csv), [csv])
-  const valid = rows.filter((r) => !r.error)
-  const invalid = rows.filter((r) => r.error)
 
   // Resolve a category name (case-insensitive) to its platform id.
   const categoryId = (name: string): string | undefined =>
     name ? categories?.find((c) => c.name.toLowerCase() === name.toLowerCase())?.id : undefined
-  const categoryUnmatched = (r: ParsedRow) => Boolean(r.category) && !categoryId(r.category)
+  // Only flag unmatched once the category list has loaded, so rows don't all
+  // flash invalid while categories are still fetching.
+  const categoryUnmatched = (r: ParsedRow) => Boolean(r.category) && Boolean(categories) && !categoryId(r.category)
+  // A required category that doesn't resolve to a real platform category is as
+  // invalid as a missing one — otherwise the product imports with no category.
+  const rowError = (r: ParsedRow): string | undefined =>
+    r.error ?? (categoryUnmatched(r) ? `Unknown category "${r.category}"` : undefined)
+
+  const valid = rows.filter((r) => !rowError(r))
+  const invalid = rows.filter((r) => rowError(r))
 
   // Media library lookup: image name (and name-without-extension) → URL, so the
   // `images` column can reference photos by file name instead of a URL.
@@ -378,7 +387,7 @@ export default function BulkProductsPage() {
                   </thead>
                   <tbody className="divide-y divide-border">
                     {rows.map((r) => (
-                      <tr key={r.line} className={r.error ? "bg-red-50/50" : ""}>
+                      <tr key={r.line} className={rowError(r) ? "bg-red-50/50" : ""}>
                         <td className="px-4 py-2 font-medium text-foreground">{r.title || <span className="text-muted-foreground italic">—</span>}</td>
                         <td className="px-4 py-2 font-mono text-xs text-muted-foreground">{r.sku || "—"}</td>
                         <td className="px-4 py-2 text-right tabular-nums">{r.cost ? `$${r.cost.toFixed(2)}` : "—"}</td>
@@ -387,7 +396,7 @@ export default function BulkProductsPage() {
                         <td className="px-4 py-2 text-xs">
                           {r.category
                             ? categoryUnmatched(r)
-                              ? <span className="inline-flex items-center gap-1 text-amber-600" title="No matching platform category — product will be created without one"><AlertTriangle className="h-3 w-3" /> {r.category}</span>
+                              ? <span className="inline-flex items-center gap-1 text-red-600" title="No matching platform category — fix the category name before importing"><AlertTriangle className="h-3 w-3" /> {r.category}</span>
                               : <span className="text-muted-foreground">{r.category}</span>
                             : <span className="text-muted-foreground">—</span>}
                         </td>
@@ -412,8 +421,8 @@ export default function BulkProductsPage() {
                               })()}
                         </td>
                         <td className="px-4 py-2">
-                          {r.error
-                            ? <span className="inline-flex items-center gap-1 text-xs text-red-600"><AlertTriangle className="h-3.5 w-3.5" /> {r.error}</span>
+                          {rowError(r)
+                            ? <span className="inline-flex items-center gap-1 text-xs text-red-600"><AlertTriangle className="h-3.5 w-3.5" /> {rowError(r)}</span>
                             : <CheckCircle2 className="h-4 w-4 text-green-600" />}
                         </td>
                       </tr>
@@ -428,11 +437,11 @@ export default function BulkProductsPage() {
         {/* Import action + progress */}
         {rows.length > 0 && (
           <div className="flex items-center gap-3">
-            <Button onClick={run} loading={running} disabled={valid.length === 0 || running}>
+            <Button onClick={run} loading={running} disabled={valid.length === 0 || invalid.length > 0 || running}>
               {running ? `Importing ${done}/${valid.length}…` : `Import ${valid.length} product${valid.length === 1 ? "" : "s"}`}
             </Button>
             {invalid.length > 0 && !running && (
-              <span className="text-xs text-muted-foreground">{invalid.length} row{invalid.length === 1 ? "" : "s"} with errors will be skipped.</span>
+              <span className="text-xs text-red-600">Fix {invalid.length} row{invalid.length === 1 ? "" : "s"} with errors before importing.</span>
             )}
           </div>
         )}
