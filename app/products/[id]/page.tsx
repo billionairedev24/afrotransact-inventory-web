@@ -13,9 +13,11 @@ import {
   useAddVariant,
   useProduct,
   useProductImageActions,
+  useStock,
 } from "@/lib/queries"
+import { AdjustStockDialog } from "@/components/stock/AdjustStockDialog"
 import { fromCents, relativeTime } from "@/lib/format"
-import type { ProductStatus } from "@/lib/api"
+import type { ProductStatus, StockLevel } from "@/lib/api"
 
 const STATUS_TONE: Record<ProductStatus, "neutral" | "success" | "warning"> = {
   draft: "warning",
@@ -26,7 +28,9 @@ const STATUS_TONE: Record<ProductStatus, "neutral" | "success" | "warning"> = {
 export default function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const { data, isLoading, isError } = useProduct(id)
+  const { data: stock } = useStock()
   const [showVariantForm, setShowVariantForm] = useState(false)
+  const [adjustRow, setAdjustRow] = useState<StockLevel | null>(null)
 
   if (isLoading) {
     return (
@@ -44,6 +48,9 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
       </AppShell>
     )
   }
+
+  const variantIds = new Set((data.variants ?? []).map((v) => v.id))
+  const productStock = (stock ?? []).filter((s) => variantIds.has(s.variant_id))
 
   return (
     <AppShell>
@@ -122,6 +129,45 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
               </table>
             )}
           </Card>
+
+          <Card>
+            <CardHeader className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold">Stock</h2>
+              <span className="text-xs text-muted-foreground">Adjusting stock updates the storefront immediately.</span>
+            </CardHeader>
+            {productStock.length === 0 ? (
+              <CardBody>
+                <p className="text-sm text-muted-foreground">
+                  No stock records yet — add a variant and an active location, then adjust here.
+                </p>
+              </CardBody>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="px-5 py-3 text-left font-semibold">SKU</th>
+                    <th className="px-5 py-3 text-left font-semibold">Location</th>
+                    <th className="px-5 py-3 text-right font-semibold">On hand</th>
+                    <th className="px-5 py-3 text-right font-semibold">Available</th>
+                    <th className="px-5 py-3"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {productStock.map((s) => (
+                    <tr key={`${s.variant_id}:${s.location_id}`}>
+                      <td className="px-5 py-3 font-mono text-xs">{s.variant_sku}</td>
+                      <td className="px-5 py-3 text-muted-foreground">{s.location_code}</td>
+                      <td className="px-5 py-3 text-right tabular-nums font-semibold">{s.on_hand}</td>
+                      <td className="px-5 py-3 text-right tabular-nums text-muted-foreground">{s.available}</td>
+                      <td className="px-5 py-3 text-right">
+                        <Button size="sm" variant="secondary" onClick={() => setAdjustRow(s)}>Adjust</Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Card>
         </div>
 
         <div className="space-y-6">
@@ -172,6 +218,8 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
           </Card>
         </div>
       </div>
+
+      {adjustRow && <AdjustStockDialog row={adjustRow} onClose={() => setAdjustRow(null)} />}
     </AppShell>
   )
 }
