@@ -44,10 +44,65 @@ const SESSION_COOKIE_NAMES = [
   "next-auth.session-token.0",
 ]
 
+// Base names whose `.0/.1/...` chunks we sweep. See sweepStaleChunks below.
+const CHUNK_BASES = ["__Secure-next-auth.session-token", "next-auth.session-token"]
+
+// The parent domain the session cookie is scoped to in prod, derived the same
+// way lib/auth.ts derives it. We must delete stale chunk cookies with the SAME
+// Domain they were written with, or the browser keeps them.
+function sessionCookieDomain(): string | undefined {
+  try {
+    const host = new URL(process.env.NEXTAUTH_URL ?? "").hostname
+    return host === "afrotransact.com" || host.endsWith(".afrotransact.com")
+      ? ".afrotransact.com"
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// Legacy stale-chunk sweep. Before the token was slimmed, the session cookie
+// exceeded 4 KB so NextAuth chunked it into `<name>.0` / `.1`. Those chunks
+// linger in browsers and SHADOW the fresh single cookie: NextAuth reassembles
+// from the stale chunks, decodes an empty session, sends no bearer token to the
+// inventory API, gets 401s, and the app loops through sign-in forever.
+// Post-slim sessions never chunk, so whenever a base cookie AND its `.0` chunk
+// coexist the chunks are guaranteed stale — expire them once and reload clean.
+// The `__cc` guard makes the sweep fire at most once so a domain mismatch can
+// never turn into its own redirect loop.
+function sweepStaleChunks(req: NextRequest): NextResponse | null {
+  if (req.nextUrl.searchParams.get("__cc") === "1") return null
+  const base = CHUNK_BASES.find((n) => req.cookies.has(n) && req.cookies.has(`${n}.0`))
+  if (!base) return null
+
+  const to = req.nextUrl.clone()
+  to.searchParams.set("__cc", "1")
+  const res = NextResponse.redirect(to)
+
+  const domain = sessionCookieDomain()
+  const secure = base.startsWith("__Secure-")
+  for (const suffix of [".0", ".1", ".2", ".3", ".4", ".5"]) {
+    const name = `${base}${suffix}`
+    // Delete both the domain-scoped and the host-only variant to be safe.
+    for (const dom of domain ? [domain, undefined] : [undefined]) {
+      const attrs = [`${name}=`, "Path=/", "Max-Age=0", "HttpOnly", "SameSite=Lax"]
+      if (secure) attrs.push("Secure")
+      if (dom) attrs.push(`Domain=${dom}`)
+      res.headers.append("Set-Cookie", attrs.join("; "))
+    }
+  }
+  return res
+}
+
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
 
   if (isPublic(pathname)) return NextResponse.next()
+
+  // Drop stale pre-slim session-cookie chunks before anything reads the
+  // session — otherwise they shadow the real cookie and loop the user.
+  const swept = sweepStaleChunks(req)
+  if (swept) return swept
 
   const authEnabled = Boolean(process.env.KEYCLOAK_ISSUER && process.env.KEYCLOAK_CLIENT_ID)
   if (!authEnabled) return NextResponse.next()
