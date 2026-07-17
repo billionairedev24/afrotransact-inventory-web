@@ -94,7 +94,20 @@ function sweepStaleChunks(req: NextRequest): NextResponse | null {
   return res
 }
 
-export async function proxy(req: NextRequest) {
+// Fail OPEN: a decode hiccup / cold-start race inside getToken (or any
+// unexpected edge error) must never surface as "MIDDLEWARE_INVOCATION_FAILED"
+// and take the whole app down. This proxy is already optimistic (it defers auth
+// to Node + the backend), so letting a request through on error is safe — the
+// server-side session + backend still enforce access.
+export async function proxy(req: NextRequest): Promise<NextResponse> {
+  try {
+    return await runProxy(req)
+  } catch {
+    return NextResponse.next()
+  }
+}
+
+async function runProxy(req: NextRequest): Promise<NextResponse> {
   const { pathname } = req.nextUrl
 
   if (isPublic(pathname)) return NextResponse.next()
