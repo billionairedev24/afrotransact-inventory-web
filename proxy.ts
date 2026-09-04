@@ -8,9 +8,11 @@ import { AUTH_SECRET } from "@/lib/secret"
 //
 // Anything else lands on /unauthorized.
 //
-// Auth can be turned off entirely in dev by leaving KEYCLOAK_ISSUER unset —
+// Auth can be turned off ONLY in local dev by leaving KEYCLOAK_ISSUER unset —
 // in that mode the proxy short-circuits to next() so a fresh checkout boots
-// without secrets. The backend's devAuthBypass mirrors this.
+// without secrets. In production this fails CLOSED (503) so a missing env var
+// can never silently expose the admin console. The backend mirrors this
+// (fail-closed unless an explicit insecure-dev flag is set).
 
 const REQUIRED_ROLE = "admin"
 const REQUIRED_PERMISSION = "inventory:access"
@@ -118,7 +120,22 @@ async function runProxy(req: NextRequest): Promise<NextResponse> {
   if (swept) return swept
 
   const authEnabled = Boolean(process.env.KEYCLOAK_ISSUER && process.env.KEYCLOAK_CLIENT_ID)
-  if (!authEnabled) return NextResponse.next()
+  if (!authEnabled) {
+    // FAIL CLOSED in production. Leaving KC env unset is a dev-only convenience
+    // (boot a fresh checkout without secrets); in prod a missing/typo'd var must
+    // NOT silently turn the entire admin console public. Anything non-dev that
+    // lands here with auth disabled is a misconfiguration — refuse it.
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "[auth] KEYCLOAK_ISSUER/KEYCLOAK_CLIENT_ID unset in production — refusing request. " +
+          "Auth-disabled mode is dev-only.",
+      )
+      return new NextResponse("Service unavailable: authentication is not configured.", {
+        status: 503,
+      })
+    }
+    return NextResponse.next()
+  }
 
   // OPTIMISTIC gate (the pattern Next.js's docs recommend for proxy): redirect
   // to sign-in only when there's NO session cookie — a check that needs no

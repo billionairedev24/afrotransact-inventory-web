@@ -1,15 +1,15 @@
 /**
- * Inventory API client. Single fetch wrapper so every call carries the
- * Keycloak bearer, generates an X-Idempotency-Key on mutations, and
- * surfaces structured errors to the caller for toast rendering.
+ * Inventory API client. Single fetch wrapper that calls the same-origin BFF
+ * proxy (`/api/gw`), generates an X-Idempotency-Key on mutations, and surfaces
+ * structured errors to the caller for toast rendering.
  *
- * Reads NEXT_PUBLIC_INVENTORY_API_URL. When unset, defaults to the
- * docker-compose host port (8095). For local non-docker dev override
- * to http://localhost:8090.
+ * The Keycloak bearer is attached SERVER-SIDE by the /api/gw route from the
+ * session cookie — it is never read into the browser (see
+ * project_bff_token_exposure). All calls here are client-side and same-origin,
+ * so the relative base is correct and no CORS surface is exposed.
  */
 
-export const API_BASE =
-  process.env.NEXT_PUBLIC_INVENTORY_API_URL ?? "http://localhost:8095"
+export const API_BASE = "/api/gw"
 
 // ─── Types — shape mirrors internal/domain on the backend ──────────────────
 
@@ -356,19 +356,6 @@ export interface ApiError {
 
 // ─── Fetch core ─────────────────────────────────────────────────────────────
 
-async function getAccessToken(): Promise<string | undefined> {
-  // Server components import this module too, but they never hit mutating
-  // routes — they read from the backend with a service-account flow in
-  // prod. For now we rely on the client-side useSession hook injecting
-  // the bearer. When called from a server context with no token, the
-  // backend's dev bypass handles unauth dev traffic.
-  if (typeof window === "undefined") return undefined
-  // next-auth's getSession is dynamic-imported to keep server bundles lean.
-  const mod = await import("next-auth/react")
-  const session = await mod.getSession()
-  return (session as { accessToken?: string } | null)?.accessToken
-}
-
 function newIdempotencyKey(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID()
@@ -379,8 +366,8 @@ function newIdempotencyKey(): string {
 async function request<T>(path: string, init: RequestInit & { idempotent?: boolean } = {}): Promise<T> {
   const headers = new Headers(init.headers)
   headers.set("Content-Type", "application/json")
-  const token = await getAccessToken()
-  if (token) headers.set("Authorization", `Bearer ${token}`)
+  // Authorization is attached server-side by the /api/gw proxy from the session
+  // cookie; the browser never handles the bearer token.
   if (init.idempotent) headers.set("X-Idempotency-Key", newIdempotencyKey())
 
   const res = await fetch(`${API_BASE}${path}`, {

@@ -215,8 +215,13 @@ export const authOptions: AuthOptions = {
       return token
     },
     async session({ session, token }) {
-      const s = session as { accessToken?: string; roles?: string[]; permissions?: string[] }
-      s.accessToken = token.accessToken as string | undefined
+      // Deliberately do NOT expose the raw Keycloak access token on the session.
+      // `/api/auth/session` is readable by any script in the browser, so putting
+      // the bearer here leaks a privileged admin token (project_bff_token_exposure).
+      // The token is used only server-side by the /api/gw proxy via getToken().
+      // roles/permissions stay for display-only UI gating (never a security
+      // boundary — the backend re-validates the KC token on every request).
+      const s = session as { roles?: string[]; permissions?: string[] }
       s.roles = (token.roles as string[] | undefined) ?? []
       s.permissions = (token.permissions as string[] | undefined) ?? []
       return session

@@ -71,6 +71,19 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
   const lines = data.lines ?? []
   const editable = data.status === "requested" || data.status === "received"
 
+  // The default state of every displayed line: restock to the default location
+  // with no refund. This is what the operator SEES for a line they never touch,
+  // so it must also be what gets submitted for that line — otherwise untouched
+  // lines are silently dropped (not restocked, no refund).
+  function lineFallback(l: (typeof lines)[number]): LineDraft {
+    return {
+      disposition: "restock",
+      condition: l.condition,
+      locationId: defaultLocation,
+      refund: "",
+      notes: "",
+    }
+  }
   function getDraft(lineId: string, fallback: LineDraft): LineDraft {
     return drafts[lineId] ?? fallback
   }
@@ -78,34 +91,40 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
     setDrafts((d) => ({ ...d, [lineId]: { ...d[lineId], ...patch } }))
   }
 
+  // NaN-safe: a non-numeric refund entry must not serialize to `null` cents.
+  function refundCents(refund: string): number | undefined {
+    if (!refund.trim()) return undefined
+    const cents = Math.round(parseFloat(refund) * 100)
+    return Number.isFinite(cents) ? cents : undefined
+  }
+
   const summary = useMemo(() => {
     let restocking = 0
     let totalRefund = 0
     for (const l of lines) {
-      const d = drafts[l.id]
-      if (!d) continue
+      const d = drafts[l.id] ?? lineFallback(l)
       if (d.disposition === "restock") restocking += l.quantity
-      if (d.refund) totalRefund += Math.round(parseFloat(d.refund) * 100) || 0
+      totalRefund += refundCents(d.refund) ?? 0
     }
     return { restocking, totalRefund }
-  }, [drafts, lines])
+    // lineFallback/refundCents are pure over (l, drafts, defaultLocation).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drafts, lines, defaultLocation])
 
   async function submitProcess() {
-    const payload = lines
-      .map((l) => {
-        const d = drafts[l.id]
-        if (!d) return null
-        const refund = d.refund ? Math.round(parseFloat(d.refund) * 100) : undefined
-        return {
-          line_id: l.id,
-          disposition: d.disposition,
-          condition: d.condition || undefined,
-          location_id: d.disposition === "restock" ? (d.locationId || defaultLocation) : undefined,
-          refund_amount_cents: refund,
-          notes: d.notes.trim() || undefined,
-        }
-      })
-      .filter((x): x is NonNullable<typeof x> => x != null)
+    // Build from EVERY line (using each line's shown default when untouched),
+    // not only the ones the operator interacted with.
+    const payload = lines.map((l) => {
+      const d = getDraft(l.id, lineFallback(l))
+      return {
+        line_id: l.id,
+        disposition: d.disposition,
+        condition: d.condition || undefined,
+        location_id: d.disposition === "restock" ? (d.locationId || defaultLocation) : undefined,
+        refund_amount_cents: refundCents(d.refund),
+        notes: d.notes.trim() || undefined,
+      }
+    })
     if (payload.length === 0) return
     await actions.process.mutateAsync({ lines: payload })
     setDrafts({})
@@ -153,15 +172,7 @@ export default function ReturnDetailPage({ params }: { params: Promise<{ id: str
               </thead>
               <tbody className="divide-y divide-border">
                 {lines.map((l) => {
-                  const d = editable
-                    ? getDraft(l.id, {
-                        disposition: "restock",
-                        condition: l.condition,
-                        locationId: defaultLocation,
-                        refund: "",
-                        notes: "",
-                      })
-                    : null
+                  const d = editable ? getDraft(l.id, lineFallback(l)) : null
                   return (
                     <tr key={l.id}>
                       <td className="px-5 py-3 font-semibold text-foreground">{l.product_title}</td>
