@@ -48,7 +48,7 @@ const NAV: NavItem[] = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? ""
-  const { data: session } = useSession()
+  const { data: session, status } = useSession()
   const user = session?.user
   const idToken = (session as { idToken?: string } | null)?.idToken
   // Wire the global "/" hotkey: focuses whichever ScannerInput is mounted
@@ -81,6 +81,26 @@ export function AppShell({ children }: { children: ReactNode }) {
       document.body.style.overflow = prevOverflow
     }
   }, [menuOpen])
+
+  // HARD auth gate. The Edge proxy is optimistic — on Edge it can't always
+  // decode the session, so it defers to here. useSession reflects
+  // /api/auth/session (decoded in Node), so it's the reliable signal: an
+  // unauthenticated user is bounced to sign-in and NEVER sees the dashboard.
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      const cb = encodeURIComponent(window.location.pathname + window.location.search)
+      window.location.href = `/auth/signin?callbackUrl=${cb}`
+    }
+  }, [status])
+
+  if (status !== "authenticated") {
+    return (
+      <div className="flex min-h-screen items-center justify-center gap-2 text-sm text-muted-foreground">
+        <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        {status === "loading" ? "Loading…" : "Redirecting to sign in…"}
+      </div>
+    )
+  }
 
   return (
     <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] bg-muted/30">
