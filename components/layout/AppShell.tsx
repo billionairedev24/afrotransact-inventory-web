@@ -3,7 +3,6 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useSession } from "next-auth/react"
-import { signOutFromKeycloak } from "@/lib/signout"
 import {
   BarChart3,
   Box,
@@ -48,9 +47,8 @@ const NAV: NavItem[] = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? ""
-  const { data: session } = useSession()
+  const { data: session, status } = useSession()
   const user = session?.user
-  const idToken = (session as { idToken?: string } | null)?.idToken
   // Wire the global "/" hotkey: focuses whichever ScannerInput is mounted
   // on the current page. No-op on pages with no scanner.
   useGlobalScannerHotkey()
@@ -82,11 +80,31 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   }, [menuOpen])
 
+  // HARD auth gate. The Edge proxy is optimistic — on Edge it can't always
+  // decode the session, so it defers to here. useSession reflects
+  // /api/auth/session (decoded in Node), so it's the reliable signal: an
+  // unauthenticated user is bounced to sign-in and NEVER sees the dashboard.
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      const cb = encodeURIComponent(window.location.pathname + window.location.search)
+      window.location.href = `/auth/signin?callbackUrl=${cb}`
+    }
+  }, [status])
+
+  if (status !== "authenticated") {
+    return (
+      <div className="flex min-h-screen items-center justify-center gap-2 text-sm text-muted-foreground">
+        <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        {status === "loading" ? "Loading…" : "Redirecting to sign in…"}
+      </div>
+    )
+  }
+
   return (
     <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] bg-muted/30">
       {/* Desktop sidebar */}
       <aside className="hidden lg:flex flex-col border-r border-border bg-card">
-        <SidebarNav pathname={pathname} user={user} idToken={idToken} />
+        <SidebarNav pathname={pathname} user={user} />
       </aside>
 
       <InflightBar />
@@ -140,7 +158,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         <SidebarNav
           pathname={pathname}
           user={user}
-          idToken={idToken}
           onNavigate={() => setMenuOpen(false)}
           onClose={() => setMenuOpen(false)}
           closeRef={closeRef}
@@ -172,14 +189,12 @@ export function AppShell({ children }: { children: ReactNode }) {
 function SidebarNav({
   pathname,
   user,
-  idToken,
   onNavigate,
   onClose,
   closeRef,
 }: {
   pathname: string
   user?: { name?: string | null; email?: string | null } | null
-  idToken?: string
   onNavigate?: () => void
   onClose?: () => void
   closeRef?: RefObject<HTMLButtonElement | null>
@@ -241,14 +256,19 @@ function SidebarNav({
             <p className="truncate text-[11px] text-muted-foreground">{user.email}</p>
             <button
               type="button"
-              onClick={() => void signOutFromKeycloak(idToken)}
+              onClick={() => { window.location.href = "/api/auth/signout" }}
               className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-gold rounded"
             >
               <LogOut className="h-3.5 w-3.5" /> Sign out
             </button>
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">Dev mode (no auth)</p>
+          <a
+            href="/auth/signin"
+            className="inline-flex items-center gap-1.5 rounded text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-gold"
+          >
+            <LogOut className="h-3.5 w-3.5 rotate-180" /> Sign in
+          </a>
         )}
       </div>
     </>

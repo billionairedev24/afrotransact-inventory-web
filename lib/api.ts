@@ -1,15 +1,15 @@
 /**
- * Inventory API client. Single fetch wrapper so every call carries the
- * Keycloak bearer, generates an X-Idempotency-Key on mutations, and
- * surfaces structured errors to the caller for toast rendering.
+ * Inventory API client. Single fetch wrapper that calls the same-origin BFF
+ * proxy (`/api/gw`), generates an X-Idempotency-Key on mutations, and surfaces
+ * structured errors to the caller for toast rendering.
  *
- * Reads NEXT_PUBLIC_INVENTORY_API_URL. When unset, defaults to the
- * docker-compose host port (8095). For local non-docker dev override
- * to http://localhost:8090.
+ * The Keycloak bearer is attached SERVER-SIDE by the /api/gw route from the
+ * session cookie — it is never read into the browser (see
+ * project_bff_token_exposure). All calls here are client-side and same-origin,
+ * so the relative base is correct and no CORS surface is exposed.
  */
 
-export const API_BASE =
-  process.env.NEXT_PUBLIC_INVENTORY_API_URL ?? "http://localhost:8095"
+export const API_BASE = "/api/gw"
 
 // ─── Types — shape mirrors internal/domain on the backend ──────────────────
 
@@ -356,19 +356,6 @@ export interface ApiError {
 
 // ─── Fetch core ─────────────────────────────────────────────────────────────
 
-async function getAccessToken(): Promise<string | undefined> {
-  // Server components import this module too, but they never hit mutating
-  // routes — they read from the backend with a service-account flow in
-  // prod. For now we rely on the client-side useSession hook injecting
-  // the bearer. When called from a server context with no token, the
-  // backend's dev bypass handles unauth dev traffic.
-  if (typeof window === "undefined") return undefined
-  // next-auth's getSession is dynamic-imported to keep server bundles lean.
-  const mod = await import("next-auth/react")
-  const session = await mod.getSession()
-  return (session as { accessToken?: string } | null)?.accessToken
-}
-
 function newIdempotencyKey(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID()
@@ -379,8 +366,8 @@ function newIdempotencyKey(): string {
 async function request<T>(path: string, init: RequestInit & { idempotent?: boolean } = {}): Promise<T> {
   const headers = new Headers(init.headers)
   headers.set("Content-Type", "application/json")
-  const token = await getAccessToken()
-  if (token) headers.set("Authorization", `Bearer ${token}`)
+  // Authorization is attached server-side by the /api/gw proxy from the session
+  // cookie; the browser never handles the bearer token.
   if (init.idempotent) headers.set("X-Idempotency-Key", newIdempotencyKey())
 
   const res = await fetch(`${API_BASE}${path}`, {
@@ -398,24 +385,51 @@ async function request<T>(path: string, init: RequestInit & { idempotent?: boole
   }
   if (res.status === 204) return undefined as unknown as T
   const body = await res.text()
-  let parsed: unknown
+  let parsed: unknown = null
   try {
     parsed = body ? JSON.parse(body) : null
   } catch {
-    parsed = body
+    // Non-JSON body (e.g. an nginx 503 HTML page, a proxy timeout). Never show
+    // it raw — fall back to a clean status message below.
+    parsed = null
   }
   if (!res.ok) {
-    const err = parsed as Partial<ApiError> | string
-    if (typeof err === "string") {
-      throw apiError(res.status, "error", err)
-    }
-    throw apiError(res.status, err.code ?? "error", err.detail ?? `HTTP ${res.status}`)
+    // Only trust a JSON error envelope from our own API; anything else gets a
+    // friendly, status-based message so raw upstream HTML never reaches the UI.
+    const envelope = parsed && typeof parsed === "object" ? (parsed as Partial<ApiError>) : null
+    throw apiError(
+      res.status,
+      envelope?.code ?? "error",
+      envelope?.detail?.trim() || statusMessage(res.status),
+    )
   }
   return parsed as T
 }
 
 function apiError(status: number, code: string, detail: string): ApiError {
   return { status, code, detail }
+}
+
+/** Clean, human message for a status when the server gave us no JSON error body
+ *  (e.g. a proxy/nginx HTML page, a gateway timeout). Never surface raw HTML. */
+function statusMessage(status: number): string {
+  switch (status) {
+    case 502:
+    case 504:
+      return "Couldn't reach the inventory service. Please try again in a moment."
+    case 503:
+      return "The inventory service is temporarily unavailable. Please try again shortly."
+    case 500:
+      return "Something went wrong on our side. Please try again."
+    case 403:
+      return "You don't have permission to do that."
+    case 404:
+      return "That wasn't found."
+    case 429:
+      return "Too many requests — please slow down and try again."
+    default:
+      return `Request failed (HTTP ${status}).`
+  }
 }
 
 export function isApiError(e: unknown): e is ApiError {

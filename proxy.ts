@@ -8,9 +8,9 @@ import { AUTH_SECRET } from "@/lib/secret"
 //
 // Anything else lands on /unauthorized.
 //
-// Auth can be turned off entirely in dev by leaving KEYCLOAK_ISSUER unset —
-// in that mode the proxy short-circuits to next() so a fresh checkout boots
-// without secrets. The backend's devAuthBypass mirrors this.
+// There is NO no-auth mode. If KEYCLOAK_ISSUER/CLIENT_ID aren't configured the
+// proxy fails closed (503) for every request — locally and in production alike.
+// The backend mirrors this (fail-closed unless an explicit insecure-dev flag).
 
 const REQUIRED_ROLE = "admin"
 const REQUIRED_PERMISSION = "inventory:access"
@@ -118,7 +118,17 @@ async function runProxy(req: NextRequest): Promise<NextResponse> {
   if (swept) return swept
 
   const authEnabled = Boolean(process.env.KEYCLOAK_ISSUER && process.env.KEYCLOAK_CLIENT_ID)
-  if (!authEnabled) return NextResponse.next()
+  if (!authEnabled) {
+    // No-auth mode is ERADICATED. The admin console must never run without
+    // Keycloak configured — not even locally. If the env is missing/typo'd,
+    // refuse every request rather than silently exposing the app.
+    console.error(
+      "[auth] KEYCLOAK_ISSUER/KEYCLOAK_CLIENT_ID not set — refusing request. Configure Keycloak.",
+    )
+    return new NextResponse("Service unavailable: authentication is not configured.", {
+      status: 503,
+    })
+  }
 
   // OPTIMISTIC gate (the pattern Next.js's docs recommend for proxy): redirect
   // to sign-in only when there's NO session cookie — a check that needs no
