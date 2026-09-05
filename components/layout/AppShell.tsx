@@ -248,7 +248,12 @@ function SidebarNav({
             </button>
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">Dev mode (no auth)</p>
+          <a
+            href="/auth/signin"
+            className="inline-flex items-center gap-1.5 rounded text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-gold"
+          >
+            <LogOut className="h-3.5 w-3.5 rotate-180" /> Sign in
+          </a>
         )}
       </div>
     </>

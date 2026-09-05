@@ -8,11 +8,9 @@ import { AUTH_SECRET } from "@/lib/secret"
 //
 // Anything else lands on /unauthorized.
 //
-// Auth can be turned off ONLY in local dev by leaving KEYCLOAK_ISSUER unset —
-// in that mode the proxy short-circuits to next() so a fresh checkout boots
-// without secrets. In production this fails CLOSED (503) so a missing env var
-// can never silently expose the admin console. The backend mirrors this
-// (fail-closed unless an explicit insecure-dev flag is set).
+// There is NO no-auth mode. If KEYCLOAK_ISSUER/CLIENT_ID aren't configured the
+// proxy fails closed (503) for every request — locally and in production alike.
+// The backend mirrors this (fail-closed unless an explicit insecure-dev flag).
 
 const REQUIRED_ROLE = "admin"
 const REQUIRED_PERMISSION = "inventory:access"
@@ -121,20 +119,15 @@ async function runProxy(req: NextRequest): Promise<NextResponse> {
 
   const authEnabled = Boolean(process.env.KEYCLOAK_ISSUER && process.env.KEYCLOAK_CLIENT_ID)
   if (!authEnabled) {
-    // FAIL CLOSED in production. Leaving KC env unset is a dev-only convenience
-    // (boot a fresh checkout without secrets); in prod a missing/typo'd var must
-    // NOT silently turn the entire admin console public. Anything non-dev that
-    // lands here with auth disabled is a misconfiguration — refuse it.
-    if (process.env.NODE_ENV === "production") {
-      console.error(
-        "[auth] KEYCLOAK_ISSUER/KEYCLOAK_CLIENT_ID unset in production — refusing request. " +
-          "Auth-disabled mode is dev-only.",
-      )
-      return new NextResponse("Service unavailable: authentication is not configured.", {
-        status: 503,
-      })
-    }
-    return NextResponse.next()
+    // No-auth mode is ERADICATED. The admin console must never run without
+    // Keycloak configured — not even locally. If the env is missing/typo'd,
+    // refuse every request rather than silently exposing the app.
+    console.error(
+      "[auth] KEYCLOAK_ISSUER/KEYCLOAK_CLIENT_ID not set — refusing request. Configure Keycloak.",
+    )
+    return new NextResponse("Service unavailable: authentication is not configured.", {
+      status: 503,
+    })
   }
 
   // OPTIMISTIC gate (the pattern Next.js's docs recommend for proxy): redirect

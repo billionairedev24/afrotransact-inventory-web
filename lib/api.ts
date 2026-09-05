@@ -385,24 +385,51 @@ async function request<T>(path: string, init: RequestInit & { idempotent?: boole
   }
   if (res.status === 204) return undefined as unknown as T
   const body = await res.text()
-  let parsed: unknown
+  let parsed: unknown = null
   try {
     parsed = body ? JSON.parse(body) : null
   } catch {
-    parsed = body
+    // Non-JSON body (e.g. an nginx 503 HTML page, a proxy timeout). Never show
+    // it raw — fall back to a clean status message below.
+    parsed = null
   }
   if (!res.ok) {
-    const err = parsed as Partial<ApiError> | string
-    if (typeof err === "string") {
-      throw apiError(res.status, "error", err)
-    }
-    throw apiError(res.status, err.code ?? "error", err.detail ?? `HTTP ${res.status}`)
+    // Only trust a JSON error envelope from our own API; anything else gets a
+    // friendly, status-based message so raw upstream HTML never reaches the UI.
+    const envelope = parsed && typeof parsed === "object" ? (parsed as Partial<ApiError>) : null
+    throw apiError(
+      res.status,
+      envelope?.code ?? "error",
+      envelope?.detail?.trim() || statusMessage(res.status),
+    )
   }
   return parsed as T
 }
 
 function apiError(status: number, code: string, detail: string): ApiError {
   return { status, code, detail }
+}
+
+/** Clean, human message for a status when the server gave us no JSON error body
+ *  (e.g. a proxy/nginx HTML page, a gateway timeout). Never surface raw HTML. */
+function statusMessage(status: number): string {
+  switch (status) {
+    case 502:
+    case 504:
+      return "Couldn't reach the inventory service. Please try again in a moment."
+    case 503:
+      return "The inventory service is temporarily unavailable. Please try again shortly."
+    case 500:
+      return "Something went wrong on our side. Please try again."
+    case 403:
+      return "You don't have permission to do that."
+    case 404:
+      return "That wasn't found."
+    case 429:
+      return "Too many requests — please slow down and try again."
+    default:
+      return `Request failed (HTTP ${status}).`
+  }
 }
 
 export function isApiError(e: unknown): e is ApiError {
