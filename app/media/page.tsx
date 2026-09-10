@@ -1,7 +1,7 @@
 "use client"
 
-import { useRef, useState } from "react"
-import { Plus, RefreshCw, Trash2, Check, Pencil, ImageIcon } from "lucide-react"
+import { useMemo, useRef, useState } from "react"
+import { Plus, RefreshCw, Trash2, Check, Pencil, ImageIcon, ChevronLeft, ChevronRight } from "lucide-react"
 import { AppShell, PageHeader } from "@/components/layout/AppShell"
 import { Card, CardBody } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
@@ -11,6 +11,8 @@ import { useMedia, useRenameMedia, useDeleteMedia, useSyncMediaFromUploadThing }
 import { useMediaUpload } from "@/components/media/useMediaUpload"
 import type { MediaAsset } from "@/lib/api"
 
+const PAGE_SIZE = 24
+
 export default function MediaLibraryPage() {
   const { data: assets, isLoading } = useMedia()
   const rename = useRenameMedia()
@@ -18,6 +20,20 @@ export default function MediaLibraryPage() {
   const sync = useSyncMediaFromUploadThing()
   const { upload, isUploading } = useMediaUpload()
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // The API returns the whole library in one response, so the grid grew without
+  // bound and became unusable once the library got past a screenful. Paginate
+  // client-side: no API change, and the data is already in memory.
+  const [page, setPage] = useState(0)
+  const total = assets?.length ?? 0
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  // Deleting the last item on the last page would otherwise strand the user on
+  // an empty page with no way back.
+  const safePage = Math.min(page, pageCount - 1)
+  const pageAssets = useMemo(
+    () => (assets ?? []).slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE),
+    [assets, safePage],
+  )
 
   return (
     <AppShell>
@@ -46,7 +62,9 @@ export default function MediaLibraryPage() {
           <RefreshCw className="h-4 w-4" /> Sync from UploadThing
         </Button>
         <span className="ml-auto text-sm text-muted-foreground">
-          {assets?.length ?? 0} image{(assets?.length ?? 0) === 1 ? "" : "s"}
+          {total === 0
+            ? "No images"
+            : `${safePage * PAGE_SIZE + 1}–${Math.min((safePage + 1) * PAGE_SIZE, total)} of ${total} image${total === 1 ? "" : "s"}`}
         </span>
       </div>
 
@@ -60,7 +78,7 @@ export default function MediaLibraryPage() {
         />
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {assets!.map((a) => (
+          {pageAssets.map((a) => (
             <MediaCard
               key={a.id}
               asset={a}
@@ -68,6 +86,30 @@ export default function MediaLibraryPage() {
               onDelete={() => del.mutate(a.id)}
             />
           ))}
+        </div>
+      )}
+
+      {pageCount > 1 && (
+        <div className="mt-4 flex items-center justify-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={safePage === 0}
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+          >
+            <ChevronLeft className="h-4 w-4" /> Previous
+          </Button>
+          <span className="text-sm text-muted-foreground" aria-live="polite">
+            Page {safePage + 1} of {pageCount}
+          </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={safePage >= pageCount - 1}
+            onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+          >
+            Next <ChevronRight className="h-4 w-4" />
+          </Button>
         </div>
       )}
     </AppShell>

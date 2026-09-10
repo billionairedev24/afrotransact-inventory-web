@@ -8,12 +8,13 @@ import { AppShell, PageHeader } from "@/components/layout/AppShell"
 import { Card, CardBody, CardHeader } from "@/components/ui/Card"
 import { Badge } from "@/components/ui/Badge"
 import { Button } from "@/components/ui/Button"
-import { FieldLabel, Input } from "@/components/ui/Input"
+import { FieldLabel, Input, Select } from "@/components/ui/Input"
 import {
   useAddVariant,
   useProduct,
   useProductImageActions,
   useStock,
+  useMedia,
 } from "@/lib/queries"
 import { AdjustStockDialog } from "@/components/stock/AdjustStockDialog"
 import { fromCents, relativeTime } from "@/lib/format"
@@ -238,6 +239,12 @@ function ImagesCard({ productId, images }: { productId: string; images: import("
   const [showForm, setShowForm] = useState(false)
   const [url, setUrl] = useState("")
   const [alt, setAlt] = useState("")
+  // Editing a product previously offered only a raw URL box, so the media
+  // library — the whole point of naming and reusing assets — was unreachable
+  // from here. Same source the "new product" page picks from.
+  const { data: assets } = useMedia()
+  const alreadyUsed = new Set(images.map((i) => i.url))
+  const available = (assets ?? []).filter((a) => !alreadyUsed.has(a.url))
   async function add() {
     if (!url.trim()) return
     await actions.add.mutateAsync({ url: url.trim(), alt_text: alt.trim() || undefined })
@@ -256,11 +263,39 @@ function ImagesCard({ productId, images }: { productId: string; images: import("
       {showForm && (
         <div className="border-b border-border bg-muted/30 px-5 py-4 space-y-3">
           <div>
-            <FieldLabel htmlFor="iurl">URL</FieldLabel>
-            <Input id="iurl" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/yam.jpg" />
+            <FieldLabel htmlFor="ilib">Choose from media library</FieldLabel>
+            <Select
+              id="ilib"
+              value=""
+              disabled={available.length === 0}
+              onChange={(e) => {
+                const picked = available.find((a) => a.url === e.target.value)
+                if (!picked) return
+                setUrl(picked.url)
+                // Seed alt text from the asset's name so the common case needs
+                // no typing; still editable below.
+                if (!alt.trim()) setAlt(picked.name)
+              }}
+            >
+              <option value="">
+                {available.length
+                  ? "Choose an image…"
+                  : (assets?.length ?? 0) === 0
+                    ? "Library is empty — upload one on the Media page"
+                    : "Every library image is already on this product"}
+              </option>
+              {available.map((a) => (
+                <option key={a.id} value={a.url}>{a.name}</option>
+              ))}
+            </Select>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              Upload to your object store (ufs/S3), then paste the public URL here.
+              Reuses a named asset — no re-uploading. Manage them on the{" "}
+              <Link href="/media" className="underline">Media page</Link>.
             </p>
+          </div>
+          <div>
+            <FieldLabel htmlFor="iurl">…or paste a URL</FieldLabel>
+            <Input id="iurl" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/yam.jpg" />
           </div>
           <div>
             <FieldLabel htmlFor="ialt">Alt text</FieldLabel>
