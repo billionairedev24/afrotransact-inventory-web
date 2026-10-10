@@ -478,12 +478,28 @@ function RowMenu<T>({
         <div
           ref={menuRef}
           role="menu"
-          // Explicit opaque background — bg-popover relies on a CSS var
-          // that didn't always paint solidly when portaled to document.body
-          // outside the app's theme container. White is the safe default;
-          // dark-mode override sits next to it.
-          style={{ position: "fixed", top: pos.top, left: pos.left, backgroundColor: "white" }}
-          className="z-50 w-48 overflow-hidden rounded-lg border border-border shadow-xl dark:!bg-neutral-900"
+          // Background AND text are set together, from the same token pair.
+          //
+          // This used to force a white background with a `dark:` override to
+          // near-black — but this app has no dark theme: globals.css defines
+          // only a light :root, with no .dark class and no prefers-color-scheme
+          // block. Tailwind's darkMode defaults to `media`, so on any machine
+          // with OS dark mode the override fired while the rest of the app
+          // stayed light, and the labels kept inheriting the light theme's
+          // near-black foreground. The result was an unreadable black box.
+          //
+          // The variants are gone and both colours come from --card /
+          // --card-foreground, which resolve fine on a node portaled to
+          // document.body since they are declared on :root. Setting them as a
+          // pair is what makes the contrast impossible to get wrong.
+          style={{
+            position: "fixed",
+            top: pos.top,
+            left: pos.left,
+            backgroundColor: "hsl(var(--card))",
+            color: "hsl(var(--card-foreground))",
+          }}
+          className="z-50 w-48 overflow-hidden rounded-lg border border-border shadow-xl"
         >
           {visible.map((a, idx) => (
             <Fragment key={idx}>
