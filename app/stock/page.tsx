@@ -112,17 +112,27 @@ export default function StockPage() {
 
 function AdjustDialog({ row, onClose }: { row: StockLevel; onClose: () => void }) {
   const adjust = useAdjustStock()
+  // "Set to" is the mode you want when a count is simply WRONG: you know the
+  // number that should be there, not how far off it is. The API only takes a
+  // delta, so the target is converted to one on submit — which also keeps the
+  // movement ledger honest, since what physically happened IS a delta.
+  const [mode, setMode] = useState<"delta" | "absolute">("delta")
   const [delta, setDelta] = useState(0)
+  const [target, setTarget] = useState(row.on_hand)
   const [reason, setReason] = useState<StockMovementReason>("receive")
   const [reference, setReference] = useState("")
 
+  // Recomputed from the row every render so a refetch between opening the
+  // dialog and submitting cannot apply a delta derived from a stale on-hand.
+  const effectiveDelta = mode === "absolute" ? target - row.on_hand : delta
+
   async function submit(e: React.FormEvent) {
     e.preventDefault()
-    if (delta === 0) return
+    if (effectiveDelta === 0) return
     await adjust.mutateAsync({
       variant_id: row.variant_id,
       location_id: row.location_id,
-      delta,
+      delta: effectiveDelta,
       reason,
       reference: reference.trim() || undefined,
     })
@@ -140,6 +150,53 @@ function AdjustDialog({ row, onClose }: { row: StockLevel; onClose: () => void }
           </p>
         </header>
         <form onSubmit={submit} className="space-y-4">
+          <div className="flex rounded-lg border border-border p-0.5 text-xs">
+            {([
+              ["delta", "Adjust by"],
+              ["absolute", "Set to"],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => {
+                  setMode(value)
+                  if (value === "absolute") {
+                    setTarget(row.on_hand)
+                    setReason("adjustment")
+                  } else {
+                    setDelta(0)
+                    setReason("receive")
+                  }
+                }}
+                className={
+                  "flex-1 rounded-md px-3 py-1.5 font-medium transition-colors " +
+                  (mode === value
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground")
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {mode === "absolute" ? (
+            <div>
+              <FieldLabel htmlFor="target">New on-hand</FieldLabel>
+              <Input
+                id="target"
+                type="number"
+                min={0}
+                value={target}
+                onChange={(e) => setTarget(Math.max(0, parseInt(e.target.value || "0", 10)))}
+              />
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                Currently {row.on_hand}. Recorded as a movement of{" "}
+                {effectiveDelta > 0 ? `+${effectiveDelta}` : effectiveDelta}, so the
+                ledger still shows what changed.
+              </p>
+            </div>
+          ) : (
           <div>
             <FieldLabel htmlFor="delta">Delta</FieldLabel>
             <div className="flex items-center gap-2">
@@ -161,6 +218,7 @@ function AdjustDialog({ row, onClose }: { row: StockLevel; onClose: () => void }
               Positive to add stock, negative to remove. New on-hand: {Math.max(0, row.on_hand + delta)}
             </p>
           </div>
+          )}
           <div>
             <FieldLabel htmlFor="reason">Reason</FieldLabel>
             <Select id="reason" value={reason} onChange={(e) => setReason(e.target.value as StockMovementReason)}>
@@ -180,7 +238,7 @@ function AdjustDialog({ row, onClose }: { row: StockLevel; onClose: () => void }
           </div>
           <div className="flex items-center justify-end gap-3 pt-1">
             <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button type="submit" loading={adjust.isPending} disabled={delta === 0}>
+            <Button type="submit" loading={adjust.isPending} disabled={effectiveDelta === 0}>
               Apply
             </Button>
           </div>
